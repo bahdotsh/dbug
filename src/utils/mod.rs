@@ -32,7 +32,8 @@ fn find_rust_files_recursive(dir: &Path, result: &mut Vec<PathBuf>) -> Result<()
     Ok(())
 }
 
-/// Check if a file is a Rust source file
+/// Check if a path is a Rust file
+#[allow(dead_code)]
 pub fn is_rust_file(path: &Path) -> bool {
     if let Some(extension) = path.extension() {
         extension == "rs"
@@ -41,7 +42,8 @@ pub fn is_rust_file(path: &Path) -> bool {
     }
 }
 
-/// Format a file path for display
+/// Format a path relative to the base directory
+#[allow(dead_code)]
 pub fn format_path(path: &Path, base_dir: &Path) -> String {
     if let Ok(relative) = path.strip_prefix(base_dir) {
         relative.display().to_string()
@@ -50,7 +52,8 @@ pub fn format_path(path: &Path, base_dir: &Path) -> String {
     }
 }
 
-/// Get the current timestamp as a string
+/// Get a timestamp string
+#[allow(dead_code)]
 pub fn timestamp() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     

@@ -14,10 +14,15 @@ pub enum VariableValue {
     Boolean(bool),
     String(String),
     Char(char),
+    #[allow(dead_code)]
     Array(Vec<VariableValue>),
+    #[allow(dead_code)]
     Struct(HashMap<String, VariableValue>),
+    #[allow(dead_code)]
     Option(Option<Box<VariableValue>>),
+    #[allow(dead_code)]
     Reference(Box<VariableValue>),
+    #[allow(dead_code)]
     Null,
     /// Enhanced type for complex data structures
     Complex {
@@ -198,6 +203,7 @@ impl VariableValue {
     }
     
     /// Create a vector representation
+    #[allow(dead_code)]
     pub fn new_vec(elements: Vec<VariableValue>, capacity: usize) -> Self {
         let length = elements.len();
         VariableValue::Vec {
@@ -208,6 +214,7 @@ impl VariableValue {
     }
     
     /// Create a hashmap representation
+    #[allow(dead_code)]
     pub fn new_hashmap(entries: Vec<(VariableValue, VariableValue)>, capacity: usize) -> Self {
         let size = entries.len();
         VariableValue::HashMap {
@@ -218,6 +225,7 @@ impl VariableValue {
     }
     
     /// Create a complex structure representation
+    #[allow(dead_code)]
     pub fn new_complex(
         type_name: &str,
         summary: &str,
@@ -269,6 +277,12 @@ pub struct VariableInspector {
     current_scope: u32,
 }
 
+impl Default for VariableInspector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VariableInspector {
     /// Create a new VariableInspector
     pub fn new() -> Self {
@@ -289,11 +303,13 @@ impl VariableInspector {
     }
 
     /// Enter a new scope
+    #[allow(dead_code)]
     pub fn enter_scope(&mut self) {
         self.current_scope += 1;
     }
 
     /// Exit the current scope, removing variables at that scope
+    #[allow(dead_code)]
     pub fn exit_scope(&mut self) {
         // Remove variables at the current scope level
         self.variables.retain(|_, var| var.scope_level < self.current_scope);
@@ -301,6 +317,7 @@ impl VariableInspector {
     }
 
     /// Update a variable's value
+    #[allow(dead_code)]
     pub fn update_variable(&mut self, name: &str, value: VariableValue) -> Result<(), String> {
         if let Some(var) = self.variables.get_mut(name) {
             if var.is_mutable {
@@ -320,12 +337,14 @@ impl VariableInspector {
     }
     
     /// Create a detailed visualization of a variable
+    #[allow(dead_code)]
     pub fn visualize_variable(&self, name: &str) -> Option<String> {
         let var = self.get_variable(name)?;
         Some(self.create_detailed_visualization(var))
     }
     
     /// Create a detailed visualization of a variable
+    #[allow(dead_code)]
     fn create_detailed_visualization(&self, var: &Variable) -> String {
         let mut result = format!("Variable: {} ({})\n", var.name, var.type_name);
         result.push_str(&format!("Mutability: {}\n", if var.is_mutable { "mutable" } else { "immutable" }));
@@ -356,20 +375,20 @@ impl VariableInspector {
                     }
                 }
                 
-                result.push_str("}");
+                result.push('}');
             }
             VariableValue::Vec { elements, length, capacity } => {
                 result.push_str(&format!("Vec<{}> (len: {}, capacity: {})\n", 
                     if !elements.is_empty() {
-                        let elem_type = match &elements[0] {
+                        
+                        match &elements[0] {
                             VariableValue::Integer(_) => "i64",
                             VariableValue::Float(_) => "f64",
                             VariableValue::Boolean(_) => "bool",
                             VariableValue::String(_) => "String",
                             VariableValue::Char(_) => "char",
                             _ => "T",
-                        };
-                        elem_type
+                        }
                     } else {
                         "T"
                     },
@@ -399,7 +418,7 @@ impl VariableInspector {
                 for (name, value) in fields {
                     result.push_str(&format!("  {}: {}\n", name, value));
                 }
-                result.push_str("}");
+                result.push('}');
             }
             _ => {
                 result.push_str(&format!("{}", var.value));

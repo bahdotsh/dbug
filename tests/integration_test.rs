@@ -21,7 +21,7 @@ fn test_help_command() {
 #[test]
 fn test_build_nonexistent_project() {
     let mut cmd = Command::cargo_bin("dbug").unwrap();
-    cmd.args(&["build", "/tmp/nonexistent_project"]);
+    cmd.args(["build", "/tmp/nonexistent_project"]);
     cmd.assert().failure();
 }
 
@@ -35,7 +35,7 @@ fn test_build_example_project() {
     }
     
     let mut cmd = Command::cargo_bin("dbug").unwrap();
-    cmd.args(&["build", &project_path.to_string_lossy()]);
+    cmd.args(["build", &project_path.to_string_lossy()]);
     cmd.assert().success();
 }
 
@@ -82,11 +82,11 @@ fn main() {
     
     // Build the project with dbug
     let mut build_cmd = Command::cargo_bin("dbug").unwrap();
-    build_cmd.args(&["build", &project_dir.to_string_lossy()]);
+    build_cmd.args(["build", &project_dir.to_string_lossy()]);
     build_cmd.assert().success();
     
     // Run the project and verify it hits the breakpoint
     let mut run_cmd = Command::cargo_bin("dbug").unwrap();
-    run_cmd.args(&["run", &project_dir.to_string_lossy()]);
+    run_cmd.args(["run", &project_dir.to_string_lossy()]);
     run_cmd.assert().success().stdout(predicate::str::contains("Breakpoint at"));
 } 

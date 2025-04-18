@@ -7,7 +7,7 @@ use std::io::{self, Write};
 use std::fs;
 use std::path::Path;
 
-use crate::runtime::{DebuggerRuntime, ExecutionState, FlowControl, Breakpoint, WatchExpression, Variable, VariableValue};
+use crate::runtime::{DebuggerRuntime, FlowControl, Variable, VariableValue};
 
 /// The current state of the debugger CLI
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +34,12 @@ pub struct DebuggerCli {
     source_cache: HashMap<String, Vec<String>>,
     /// Standard output stream for colored output
     stdout: StandardStream,
+}
+
+impl Default for DebuggerCli {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DebuggerCli {
@@ -416,7 +422,7 @@ impl DebuggerCli {
             let breakpoint = self.runtime.get_breakpoint_at(&file, line_num);
             
             // Format the line number
-            let mut prefix = if is_current {
+            let prefix = if is_current {
                 "> "
             } else if breakpoint.is_some() {
                 "B "
@@ -431,7 +437,7 @@ impl DebuggerCli {
             };
             
             // Print the line with appropriate coloring
-            let mut stdout = &mut self.stdout;
+            let stdout = &mut self.stdout;
             let _ = stdout.reset();
             
             if is_current {

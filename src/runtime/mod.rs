@@ -1,10 +1,49 @@
 // Runtime engine module for the dbug debugger
 
-mod variables;
-mod flow_control;
+pub mod variables;
+pub mod flow_control;
 
 pub use variables::{Variable, VariableValue, VariableInspector};
-pub use flow_control::{ExecutionState, FlowControl, ExecutionPoint, StackFrame, CallStack, FlowController};
+pub use flow_control::{ExecutionState, FlowControl, ExecutionPoint, FlowController};
+
+/// Helper function for evaluating member access expressions
+/// Split out to avoid clippy warnings about recursion parameters
+fn evaluate_member_access_helper(base_var: &Variable, members: &[&str]) -> Option<String> {
+    if members.is_empty() {
+        return Some(base_var.value.to_string());
+    }
+
+    // Get the first member
+    let member = members[0];
+
+    // Handle the member access based on the base variable's type
+    match &base_var.value {
+        VariableValue::Struct(fields) => {
+            if let Some(field_value) = fields.get(member) {
+                if members.len() == 1 {
+                    // This is the last member, return its value
+                    return Some(field_value.to_string());
+                } else {
+                    // Create a temporary variable for the field
+                    let temp_var = Variable::new(
+                        member,
+                        "field",
+                        field_value.clone(),
+                        base_var.scope_level,
+                        false
+                    );
+                    
+                    // Recursively evaluate the next member
+                    return evaluate_member_access_helper(&temp_var, &members[1..]);
+                }
+            }
+        }
+        // For other types, we don't support member access
+        _ => {}
+    }
+
+    None
+}
 
 /// A breakpoint in the code
 #[derive(Debug, Clone)]
@@ -40,17 +79,20 @@ impl Breakpoint {
     }
     
     /// Set a condition for the breakpoint
+    #[allow(dead_code)]
     pub fn with_condition(mut self, condition: &str) -> Self {
         self.condition = Some(condition.to_string());
         self
     }
     
     /// Register a hit of the breakpoint
+    #[allow(dead_code)]
     pub fn register_hit(&mut self) {
         self.hit_count += 1;
     }
     
     /// Check if the breakpoint should trigger based on its condition
+    #[allow(dead_code)]
     pub fn should_trigger(&self, variables: &VariableInspector) -> bool {
         if !self.enabled {
             return false;
@@ -85,6 +127,7 @@ impl Breakpoint {
     }
     
     /// Evaluate a simple condition (without logical operators)
+    #[allow(dead_code)]
     fn evaluate_simple_condition(&self, condition: &str, variables: &VariableInspector) -> bool {
         // Check for different comparison operators
         if condition.contains("==") {
@@ -128,6 +171,7 @@ impl Breakpoint {
     }
     
     /// Compare two values based on the given operator
+    #[allow(dead_code)]
     fn compare_values(&self, left: &str, right: &str, op: &str, variables: &VariableInspector) -> bool {
         // Get the left value (either a variable or a literal)
         let left_value = if let Some(var) = variables.get_variable(left) {
@@ -153,6 +197,7 @@ impl Breakpoint {
     }
     
     /// Parse a literal value
+    #[allow(dead_code)]
     fn parse_literal(&self, literal: &str) -> Option<VariableValue> {
         // Try to parse as integer
         if let Ok(i) = literal.parse::<i64>() {
@@ -185,6 +230,7 @@ impl Breakpoint {
     }
     
     /// Compare two variable values based on the given operator
+    #[allow(dead_code)]
     fn compare_variable_values(&self, left: &VariableValue, right: &VariableValue, op: &str) -> bool {
         match (left, right) {
             (VariableValue::Integer(left_int), VariableValue::Integer(right_int)) => {
@@ -250,6 +296,7 @@ impl Breakpoint {
     }
     
     /// Check if a variable value is "truthy"
+    #[allow(dead_code)]
     fn is_truthy(&self, value: &VariableValue) -> bool {
         match value {
             VariableValue::Boolean(b) => *b,
@@ -263,11 +310,18 @@ impl Breakpoint {
             VariableValue::Reference(_) => true,
             VariableValue::Null => false,
             VariableValue::Complex { children, fields, .. } => {
-                !fields.is_empty() || children.as_ref().map_or(false, |c| !c.is_empty())
+                !fields.is_empty() || children.as_ref().is_some_and(|c| !c.is_empty())
             },
             VariableValue::Vec { elements, .. } => !elements.is_empty(),
             VariableValue::HashMap { entries, .. } => !entries.is_empty(),
         }
+    }
+
+    /// Evaluate a member access expression for the breakpoint
+    /// This allows condition expressions to access struct members like "person.name"
+    #[allow(dead_code)]
+    fn evaluate_member_access(&self, base_var: &Variable, members: &[&str], _variables: &VariableInspector) -> Option<String> {
+        evaluate_member_access_helper(base_var, members)
     }
 }
 
@@ -296,6 +350,7 @@ impl WatchExpression {
     }
     
     /// Update the value of the watch expression
+    #[allow(dead_code)]
     pub fn update_value(&mut self, value: &str) {
         self.last_value = Some(value.to_string());
     }
@@ -359,34 +414,8 @@ impl WatchExpression {
     }
     
     /// Evaluate member access expressions like "person.name"
-    fn evaluate_member_access(&self, base_var: &Variable, members: &[&str], variables: &VariableInspector) -> Option<String> {
-        if members.is_empty() {
-            return Some(format!("{}", base_var.value));
-        }
-        
-        match &base_var.value {
-            VariableValue::Struct(fields) => {
-                if let Some(field_value) = fields.get(members[0]) {
-                    if members.len() == 1 {
-                        Some(format!("{}", field_value))
-                    } else {
-                        // Create a temporary variable for continued navigation
-                        let temp_var = Variable::new(
-                            members[0],
-                            "field",
-                            field_value.clone(),
-                            0,
-                            false
-                        );
-                        self.evaluate_member_access(&temp_var, &members[1..], variables)
-                    }
-                } else {
-                    None
-                }
-            }
-            // For other types, we don't support member access
-            _ => None,
-        }
+    fn evaluate_member_access(&self, base_var: &Variable, members: &[&str], _variables: &VariableInspector) -> Option<String> {
+        evaluate_member_access_helper(base_var, members)
     }
     
     /// Evaluate array access expressions like "array[0]"
@@ -534,6 +563,7 @@ impl DebuggerRuntime {
     }
     
     /// Add a conditional breakpoint
+    #[allow(dead_code)]
     pub fn add_conditional_breakpoint(&mut self, file: &str, line: u32, column: u32, condition: &str) -> u32 {
         let id = self.next_breakpoint_id;
         self.next_breakpoint_id += 1;
@@ -596,13 +626,12 @@ impl DebuggerRuntime {
     }
     
     /// Check if execution should break at the current point
-    pub fn should_break_at(&mut self, file: &str, line: u32, column: u32) -> bool {
+    #[allow(dead_code)]
+    pub fn should_break_at(&mut self, file: &str, line: u32, _column: u32) -> bool {
         for breakpoint in &mut self.breakpoints {
-            if breakpoint.file == file && breakpoint.line == line && breakpoint.enabled {
-                if breakpoint.should_trigger(&self.variable_inspector) {
-                    breakpoint.register_hit();
-                    return true;
-                }
+            if breakpoint.file == file && breakpoint.line == line && breakpoint.enabled && breakpoint.should_trigger(&self.variable_inspector) {
+                breakpoint.register_hit();
+                return true;
             }
         }
         false
@@ -637,12 +666,14 @@ impl DebuggerRuntime {
     }
     
     /// Enter a function
+    #[allow(dead_code)]
     pub fn enter_function(&mut self, function: &str, file: &str, line: u32) {
         self.flow_controller.enter_function(function, file, line);
         self.variable_inspector.enter_scope();
     }
     
     /// Exit a function
+    #[allow(dead_code)]
     pub fn exit_function(&mut self) {
         self.flow_controller.exit_function();
         self.variable_inspector.exit_scope();
@@ -654,6 +685,7 @@ impl DebuggerRuntime {
     }
     
     /// Get the current execution state
+    #[allow(dead_code)]
     pub fn get_execution_state(&self) -> ExecutionState {
         self.flow_controller.get_state()
     }
@@ -679,7 +711,14 @@ impl DebuggerRuntime {
     }
     
     /// Visualize a variable in detail, including complex data structures
+    #[allow(dead_code)]
     pub fn visualize_variable(&self, name: &str) -> Option<String> {
         self.variable_inspector.visualize_variable(name)
+    }
+}
+
+impl Default for DebuggerRuntime {
+    fn default() -> Self {
+        Self::new()
     }
 } 

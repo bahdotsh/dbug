@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::path::Path;
-use syn::{File, Item, Expr, Stmt, Attribute, Macro, Meta};
+use syn::{File, Item, Stmt, Attribute, Macro};
 use syn::visit::{self, Visit};
 use syn::parse_file;
 use quote::ToTokens;
@@ -10,6 +10,7 @@ use quote::ToTokens;
 /// A debug point in the code
 pub struct DebugPoint {
     /// The file containing the debug point
+    #[allow(dead_code)]
     pub file: String,
     /// The line number of the debug point
     pub line: u32,
@@ -24,6 +25,7 @@ pub enum DebugPointType {
     /// A watch point that displays a value
     Watchpoint(String),
     /// A log point that prints a message
+    #[allow(dead_code)]
     LogPoint(String),
 }
 
@@ -46,7 +48,8 @@ impl DebugPoint {
         }
     }
     
-    /// Create a new logpoint debug point
+    /// Create a new logpoint with a message
+    #[allow(dead_code)]
     pub fn logpoint(file: &str, line: u32, message: &str) -> Self {
         Self {
             file: file.to_string(),
@@ -106,7 +109,7 @@ impl<'a> DebugPointVisitor<'a> {
     }
 }
 
-impl<'ast, 'a> Visit<'ast> for DebugPointVisitor<'a> {
+impl<'ast> Visit<'ast> for DebugPointVisitor<'_> {
     fn visit_macro(&mut self, mac: &'ast Macro) {
         // Try to get a reasonable line number from the name
         if let Some(name_segment) = mac.path.segments.first() {

@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
-use syn::{parse_macro_input, ItemFn, Attribute, Expr, Stmt, parse_quote};
+use syn::{parse_macro_input, ItemFn, Stmt, parse_quote};
 
 /// Marks a function for debugging with dbug
 ///

@@ -9,12 +9,13 @@ pub mod runtime;
 pub mod instrumentation;
 pub mod utils;
 pub mod communication;
+pub mod errors;
 
 /// This module contains internal implementation details
 /// Not intended for direct use by end users
 pub mod _internal {
     use std::sync::Once;
-    use std::io;
+    use crate::errors::DbugResult;
     
     static INIT: Once = Once::new();
     
@@ -78,7 +79,7 @@ pub mod _internal {
     }
     
     /// Register a variable with the debugger
-    pub fn register_variable(name: &str, type_name: &str, value: &str, is_mutable: bool) -> io::Result<()> {
+    pub fn register_variable(name: &str, type_name: &str, value: &str, is_mutable: bool) -> DbugResult<()> {
         crate::communication::notify_variable_changed(name, type_name, value, is_mutable)
     }
 }
@@ -86,7 +87,7 @@ pub mod _internal {
 /// A collection of commonly used items
 pub mod prelude {
     // Re-export the macros from the proc-macro crate
-    pub use dbug_macros::*;
+    
     
     // Re-export specific macros by their correct names
     pub use dbug_macros::dbug;
@@ -98,4 +99,7 @@ pub mod prelude {
     
     // Re-export the register_variable function
     pub use crate::_internal::register_variable;
+    
+    // Re-export error types and utilities
+    pub use crate::errors::{DbugError, DbugResult, ErrorExt};
 } 

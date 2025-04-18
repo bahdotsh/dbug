@@ -10,8 +10,10 @@ pub enum ExecutionState {
     /// The program is paused at a breakpoint
     Paused,
     /// The program has completed execution
+    #[allow(dead_code)]
     Completed,
     /// The program has terminated with an error
+    #[allow(dead_code)]
     Error,
 }
 
@@ -25,8 +27,10 @@ pub enum FlowControl {
     /// Step to the next line, stepping into function calls
     StepInto,
     /// Step out of the current function
+    #[allow(dead_code)]
     StepOut,
     /// Run to the cursor position
+    #[allow(dead_code)]
     RunToCursor,
     /// Stop execution
     Stop,
@@ -44,6 +48,7 @@ pub struct ExecutionPoint {
     /// The function name
     pub function: String,
     /// The stack depth
+    #[allow(dead_code)]
     pub stack_depth: u32,
 }
 
@@ -70,6 +75,7 @@ pub struct StackFrame {
     /// The line number
     pub line: u32,
     /// Local variables in this frame
+    #[allow(dead_code)]
     pub variables: Vec<String>,
 }
 
@@ -85,6 +91,7 @@ impl StackFrame {
     }
 
     /// Add a variable to this stack frame
+    #[allow(dead_code)]
     pub fn add_variable(&mut self, variable: &str) {
         self.variables.push(variable.to_string());
     }
@@ -96,6 +103,12 @@ pub struct CallStack {
     frames: Vec<StackFrame>,
 }
 
+impl Default for CallStack {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CallStack {
     /// Create a new empty call stack
     pub fn new() -> Self {
@@ -103,16 +116,19 @@ impl CallStack {
     }
 
     /// Push a new frame onto the stack
+    #[allow(dead_code)]
     pub fn push_frame(&mut self, frame: StackFrame) {
         self.frames.push(frame);
     }
 
     /// Pop the top frame from the stack
+    #[allow(dead_code)]
     pub fn pop_frame(&mut self) -> Option<StackFrame> {
         self.frames.pop()
     }
 
     /// Get the current frame
+    #[allow(dead_code)]
     pub fn current_frame(&self) -> Option<&StackFrame> {
         self.frames.last()
     }
@@ -145,6 +161,12 @@ pub struct FlowController {
     call_stack: CallStack,
 }
 
+impl Default for FlowController {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FlowController {
     /// Create a new FlowController
     pub fn new() -> Self {
@@ -164,6 +186,7 @@ impl FlowController {
     }
 
     /// Pause program execution
+    #[allow(dead_code)]
     pub fn pause(&mut self) {
         self.state = ExecutionState::Paused;
     }
@@ -183,12 +206,14 @@ impl FlowController {
     }
 
     /// Complete program execution normally
+    #[allow(dead_code)]
     pub fn complete(&mut self) {
         self.state = ExecutionState::Completed;
         self.next_action = FlowControl::Stop;
     }
 
     /// Terminate program execution with an error
+    #[allow(dead_code)]
     pub fn error(&mut self) {
         self.state = ExecutionState::Error;
         self.next_action = FlowControl::Stop;
@@ -206,6 +231,7 @@ impl FlowController {
     }
 
     /// Enter a function, pushing a new frame onto the call stack
+    #[allow(dead_code)]
     pub fn enter_function(&mut self, function: &str, file: &str, line: u32) {
         let frame = StackFrame::new(function, file, line);
         self.call_stack.push_frame(frame);
@@ -217,6 +243,7 @@ impl FlowController {
     }
 
     /// Exit a function, popping the top frame from the call stack
+    #[allow(dead_code)]
     pub fn exit_function(&mut self) {
         self.call_stack.pop_frame();
         
@@ -227,11 +254,13 @@ impl FlowController {
     }
 
     /// Get the current execution state
+    #[allow(dead_code)]
     pub fn get_state(&self) -> ExecutionState {
         self.state
     }
 
     /// Get the next flow control action
+    #[allow(dead_code)]
     pub fn get_next_action(&self) -> FlowControl {
         self.next_action
     }
