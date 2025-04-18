@@ -50,6 +50,11 @@ pub mod prelude {
     // Re-export the macros from the proc-macro crate
     pub use dbug_macros::*;
     
+    // Re-export specific macros by their correct names
+    pub use dbug_macros::dbug;
+    pub use dbug_macros::break_here;
+    pub use dbug_macros::break_at;
+    
     // Re-export other commonly used items
     // This will be expanded in the future
 } 

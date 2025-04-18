@@ -3,23 +3,24 @@ use dbug::prelude::*;
 #[dbug]
 fn factorial(n: u64) -> u64 {
     if n <= 1 {
-        dbug::break_here!(); // Breakpoint at base case
-        1
+        break_here!();  // Breakpoint at base case
+        return 1;
     } else {
         let result = n * factorial(n - 1);
-        #[dbug::break_at]
-        let final_result = result; // Breakpoint before returning
-        final_result
+        // We can't use attribute macros on statements, so use break_here instead
+        break_here!();  // Breakpoint before returning
+        return result;
     }
 }
 
 #[dbug]
 fn fibonacci(n: u64) -> u64 {
     if n <= 1 {
-        n
+        return n;
     } else {
-        dbug::break_here!(); // Breakpoint in recursive case
-        fibonacci(n - 1) + fibonacci(n - 2)
+        break_here!();  // Breakpoint in recursive case
+        let result = fibonacci(n - 1) + fibonacci(n - 2);
+        return result;
     }
 }
 

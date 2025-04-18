@@ -32,19 +32,11 @@ pub fn dbug(_attr: TokenStream, item: TokenStream) -> TokenStream {
         ::dbug::_internal::enter_function(#fn_name_str);
     };
     
-    let exit_instrumentation: Stmt = parse_quote! {
-        ::dbug::_internal::exit_function(#fn_name_str);
-    };
+    // We're careful not to add the exit instrumentation at the end, which would cause
+    // the function to return () instead of its normal return type
     
     // Insert entry at the beginning
     input_fn.block.stmts.insert(0, entry_instrumentation);
-    
-    // Insert exit before each return statement
-    // For simplicity, we'll leave this to be implemented later
-    // as it requires more complex analysis of the AST
-    
-    // Add the exit instrumentation at the end
-    input_fn.block.stmts.push(exit_instrumentation);
     
     // Convert back to TokenStream
     input_fn.to_token_stream().into()
@@ -66,7 +58,9 @@ pub fn dbug(_attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn break_here(_input: TokenStream) -> TokenStream {
     let output = quote! {
-        ::dbug::_internal::break_point(file!(), line!(), column!());
+        {
+            ::dbug::_internal::break_point(file!(), line!(), column!());
+        }
     };
     
     output.into()
@@ -89,8 +83,10 @@ pub fn break_at(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let item_ast = parse_macro_input!(item_copy as Stmt);
     
     let output = quote! {
-        ::dbug::_internal::break_point(file!(), line!(), column!());
-        #item_ast
+        {
+            ::dbug::_internal::break_point(file!(), line!(), column!());
+            #item_ast
+        }
     };
     
     output.into()
