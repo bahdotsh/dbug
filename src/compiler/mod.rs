@@ -2,6 +2,7 @@
 
 use std::path::Path;
 use std::process::Command;
+use std::collections::HashMap;
 
 /// Options for building a Rust project
 pub struct BuildOptions {
@@ -11,6 +12,10 @@ pub struct BuildOptions {
     pub release: bool,
     /// Additional arguments to pass to cargo
     pub cargo_args: Vec<String>,
+    /// Compiler flags to pass to rustc
+    pub rustc_flags: Vec<String>,
+    /// Environment variables to set during compilation
+    pub env_vars: HashMap<String, String>,
 }
 
 impl Default for BuildOptions {
@@ -19,6 +24,8 @@ impl Default for BuildOptions {
             target_dir: None,
             release: false,
             cargo_args: Vec::new(),
+            rustc_flags: Vec::new(),
+            env_vars: HashMap::new(),
         }
     }
 }
@@ -57,8 +64,41 @@ impl RustProject {
             cmd.args(&["--target-dir", target_dir]);
         }
         
+        // Add any additional cargo arguments
         for arg in &options.cargo_args {
             cmd.arg(arg);
+        }
+        
+        // Add rustc flags
+        if !options.rustc_flags.is_empty() {
+            // Join all rustc flags into a single string
+            let rustc_flags = options.rustc_flags.join(" ");
+            cmd.args(&["-Z", "unstable-options", "--config", &format!("build.rustflags=[{:?}]", rustc_flags)]);
+        }
+        
+        // Set environment variables
+        for (key, value) in &options.env_vars {
+            cmd.env(key, value);
+        }
+        
+        // Run the build command
+        let status = cmd.status().map_err(|e| e.to_string())?;
+        
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("Build failed with exit code: {:?}", status.code()))
+        }
+    }
+    
+    /// Clean the project
+    pub fn clean(&self, target_dir: Option<&str>) -> Result<(), String> {
+        let mut cmd = Command::new("cargo");
+        cmd.current_dir(&self.path);
+        cmd.arg("clean");
+        
+        if let Some(dir) = target_dir {
+            cmd.args(&["--target-dir", dir]);
         }
         
         let status = cmd.status().map_err(|e| e.to_string())?;
@@ -66,7 +106,21 @@ impl RustProject {
         if status.success() {
             Ok(())
         } else {
-            Err(format!("Build failed with exit code: {:?}", status.code()))
+            Err(format!("Clean failed with exit code: {:?}", status.code()))
+        }
+    }
+    
+    /// Get the output directory for build artifacts
+    pub fn get_target_dir(&self, custom_dir: Option<&str>, release: bool) -> String {
+        let base_dir = match custom_dir {
+            Some(dir) => dir.to_string(),
+            None => format!("{}/target", self.path),
+        };
+        
+        if release {
+            format!("{}/release", base_dir)
+        } else {
+            format!("{}/debug", base_dir)
         }
     }
 } 

@@ -184,7 +184,7 @@ The Dbug project aims to create a user-friendly debugging experience for Rust de
 - [x] Basic command-line interface
 - [x] Debug point insertion syntax
   - [x] Basic syntax definitions
-  - [ ] Full implementation of debug point detection
+  - [x] Full implementation of debug point detection
 - [x] Simple compiler wrapper
 - [ ] Runtime value inspection
 - [ ] Flow control
@@ -197,17 +197,17 @@ The Dbug project aims to create a user-friendly debugging experience for Rust de
 - [x] Basic CLI structure
   - [x] Command parsing
   - [x] Help and version commands 
-  - [ ] Integration with Clap (currently using manual parsing)
+  - [x] Integration with Clap (upgraded from manual parsing)
 - [x] Implement compiler wrapper that passes through to rustc
   - [x] Basic cargo build pass-through
-  - [ ] Advanced compiler flag management
-- [ ] Source code parsing for debug point detection
+  - [x] Advanced compiler flag management
+- [x] Source code parsing for debug point detection
   - [x] Module structure
-  - [ ] Actual implementation (currently returns empty vectors)
+  - [x] Implemented enhanced debug point detection with both text-based and AST-based parsing
 - [x] Basic instrumentation system for breakpoints
   - [x] Interface definition
   - [x] Working macros for function instrumentation and breakpoints
-  - [ ] Full implementation with code transformation
+  - [x] Basic implementation with output for debugging
 
 ### Phase 2: Basic Debugging Features
 
