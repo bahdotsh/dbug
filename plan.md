@@ -186,10 +186,10 @@ The Dbug project aims to create a user-friendly debugging experience for Rust de
   - [x] Basic syntax definitions
   - [x] Full implementation of debug point detection
 - [x] Simple compiler wrapper
-- [ ] Runtime value inspection
-- [ ] Flow control
-- [ ] Conditional breakpoints
-- [ ] Watch expressions
+- [x] Runtime value inspection
+- [x] Flow control
+- [x] Conditional breakpoints
+- [x] Watch expressions
 
 ### Phase 1: Core Infrastructure
 
@@ -214,13 +214,20 @@ The Dbug project aims to create a user-friendly debugging experience for Rust de
 - [x] Basic breakpoint mechanism
   - [x] Data structures
   - [x] Basic runtime printing (prints breakpoint location)
-  - [ ] Interactive breakpoint handling
-- [ ] Variable inspection
-- [ ] Flow control (step, next, continue)
+  - [x] Interactive breakpoint handling
+- [x] Variable inspection
+  - [x] Support for various variable types
+  - [x] Variable value representation 
+  - [x] Scope management
+- [x] Flow control (step, next, continue)
+  - [x] Step over implementation
+  - [x] Step into implementation
+  - [x] Continue execution
 - [x] Basic CLI interface for debug session
   - [x] Command loop
   - [x] Help information
-  - [ ] Interactive debugging
+  - [x] Interactive debugging
+  - [x] Source code display with current line highlighting
 
 ### Phase 3: Advanced Features
 
