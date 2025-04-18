@@ -231,9 +231,9 @@ The Dbug project aims to create a user-friendly debugging experience for Rust de
 
 ### Phase 3: Advanced Features
 
-- [ ] Conditional breakpoints
-- [ ] Watch expressions
-- [ ] Complex data structure visualization
+- [x] Conditional breakpoints
+- [x] Watch expressions
+- [x] Complex data structure visualization
 - [ ] Remote debugging
 
 ### Phase 4: Polish and Performance

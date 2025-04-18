@@ -61,9 +61,213 @@ impl Breakpoint {
             return true;
         }
         
-        // TODO: Evaluate the condition based on the variables
-        // For now, always trigger if there's a condition
+        // Evaluate the condition based on the variables
+        if let Some(condition) = &self.condition {
+            // Simple expression evaluator for conditions
+            // This is a basic implementation that supports:
+            // - Variable comparisons (==, !=, <, >, <=, >=)
+            // - Logical operators (&&, ||)
+            
+            // For complex conditions, we'll split by logical operators first
+            if condition.contains("&&") {
+                let parts: Vec<&str> = condition.split("&&").collect();
+                return parts.iter().all(|part| self.evaluate_simple_condition(part.trim(), variables));
+            } else if condition.contains("||") {
+                let parts: Vec<&str> = condition.split("||").collect();
+                return parts.iter().any(|part| self.evaluate_simple_condition(part.trim(), variables));
+            } else {
+                return self.evaluate_simple_condition(condition, variables);
+            }
+        }
+        
+        // Default to true if evaluation fails
         true
+    }
+    
+    /// Evaluate a simple condition (without logical operators)
+    fn evaluate_simple_condition(&self, condition: &str, variables: &VariableInspector) -> bool {
+        // Check for different comparison operators
+        if condition.contains("==") {
+            let parts: Vec<&str> = condition.split("==").collect();
+            if parts.len() == 2 {
+                return self.compare_values(parts[0].trim(), parts[1].trim(), "==", variables);
+            }
+        } else if condition.contains("!=") {
+            let parts: Vec<&str> = condition.split("!=").collect();
+            if parts.len() == 2 {
+                return self.compare_values(parts[0].trim(), parts[1].trim(), "!=", variables);
+            }
+        } else if condition.contains("<=") {
+            let parts: Vec<&str> = condition.split("<=").collect();
+            if parts.len() == 2 {
+                return self.compare_values(parts[0].trim(), parts[1].trim(), "<=", variables);
+            }
+        } else if condition.contains(">=") {
+            let parts: Vec<&str> = condition.split(">=").collect();
+            if parts.len() == 2 {
+                return self.compare_values(parts[0].trim(), parts[1].trim(), ">=", variables);
+            }
+        } else if condition.contains("<") {
+            let parts: Vec<&str> = condition.split('<').collect();
+            if parts.len() == 2 {
+                return self.compare_values(parts[0].trim(), parts[1].trim(), "<", variables);
+            }
+        } else if condition.contains(">") {
+            let parts: Vec<&str> = condition.split('>').collect();
+            if parts.len() == 2 {
+                return self.compare_values(parts[0].trim(), parts[1].trim(), ">", variables);
+            }
+        }
+        
+        // If the condition is just a variable name, check if it's truthy
+        if let Some(var) = variables.get_variable(condition) {
+            return self.is_truthy(&var.value);
+        }
+        
+        false
+    }
+    
+    /// Compare two values based on the given operator
+    fn compare_values(&self, left: &str, right: &str, op: &str, variables: &VariableInspector) -> bool {
+        // Get the left value (either a variable or a literal)
+        let left_value = if let Some(var) = variables.get_variable(left) {
+            Some(var.value.clone())
+        } else {
+            self.parse_literal(left)
+        };
+        
+        // Get the right value (either a variable or a literal)
+        let right_value = if let Some(var) = variables.get_variable(right) {
+            Some(var.value.clone())
+        } else {
+            self.parse_literal(right)
+        };
+        
+        // Compare the values based on the operator
+        match (left_value, right_value) {
+            (Some(left_val), Some(right_val)) => {
+                self.compare_variable_values(&left_val, &right_val, op)
+            }
+            _ => false,
+        }
+    }
+    
+    /// Parse a literal value
+    fn parse_literal(&self, literal: &str) -> Option<VariableValue> {
+        // Try to parse as integer
+        if let Ok(i) = literal.parse::<i64>() {
+            return Some(VariableValue::Integer(i));
+        }
+        
+        // Try to parse as float
+        if let Ok(f) = literal.parse::<f64>() {
+            return Some(VariableValue::Float(f));
+        }
+        
+        // Check for boolean literals
+        if literal == "true" {
+            return Some(VariableValue::Boolean(true));
+        } else if literal == "false" {
+            return Some(VariableValue::Boolean(false));
+        }
+        
+        // Check for string literals
+        if literal.starts_with('"') && literal.ends_with('"') && literal.len() >= 2 {
+            return Some(VariableValue::String(literal[1..literal.len()-1].to_string()));
+        }
+        
+        // Check for char literals
+        if literal.starts_with('\'') && literal.ends_with('\'') && literal.len() == 3 {
+            return Some(VariableValue::Char(literal.chars().nth(1).unwrap()));
+        }
+        
+        None
+    }
+    
+    /// Compare two variable values based on the given operator
+    fn compare_variable_values(&self, left: &VariableValue, right: &VariableValue, op: &str) -> bool {
+        match (left, right) {
+            (VariableValue::Integer(left_int), VariableValue::Integer(right_int)) => {
+                match op {
+                    "==" => left_int == right_int,
+                    "!=" => left_int != right_int,
+                    "<" => left_int < right_int,
+                    ">" => left_int > right_int,
+                    "<=" => left_int <= right_int,
+                    ">=" => left_int >= right_int,
+                    _ => false,
+                }
+            }
+            (VariableValue::Float(left_float), VariableValue::Float(right_float)) => {
+                match op {
+                    "==" => (left_float - right_float).abs() < f64::EPSILON,
+                    "!=" => (left_float - right_float).abs() >= f64::EPSILON,
+                    "<" => left_float < right_float,
+                    ">" => left_float > right_float,
+                    "<=" => left_float <= right_float,
+                    ">=" => left_float >= right_float,
+                    _ => false,
+                }
+            }
+            (VariableValue::Boolean(left_bool), VariableValue::Boolean(right_bool)) => {
+                match op {
+                    "==" => left_bool == right_bool,
+                    "!=" => left_bool != right_bool,
+                    _ => false,
+                }
+            }
+            (VariableValue::String(left_str), VariableValue::String(right_str)) => {
+                match op {
+                    "==" => left_str == right_str,
+                    "!=" => left_str != right_str,
+                    "<" => left_str < right_str,
+                    ">" => left_str > right_str,
+                    "<=" => left_str <= right_str,
+                    ">=" => left_str >= right_str,
+                    _ => false,
+                }
+            }
+            (VariableValue::Char(left_char), VariableValue::Char(right_char)) => {
+                match op {
+                    "==" => left_char == right_char,
+                    "!=" => left_char != right_char,
+                    "<" => left_char < right_char,
+                    ">" => left_char > right_char,
+                    "<=" => left_char <= right_char,
+                    ">=" => left_char >= right_char,
+                    _ => false,
+                }
+            }
+            // For other types, only equality/inequality makes sense
+            _ => {
+                match op {
+                    "==" => format!("{:?}", left) == format!("{:?}", right),
+                    "!=" => format!("{:?}", left) != format!("{:?}", right),
+                    _ => false,
+                }
+            }
+        }
+    }
+    
+    /// Check if a variable value is "truthy"
+    fn is_truthy(&self, value: &VariableValue) -> bool {
+        match value {
+            VariableValue::Boolean(b) => *b,
+            VariableValue::Integer(i) => *i != 0,
+            VariableValue::Float(f) => *f != 0.0 && !f.is_nan(),
+            VariableValue::String(s) => !s.is_empty(),
+            VariableValue::Char(_) => true,
+            VariableValue::Array(arr) => !arr.is_empty(),
+            VariableValue::Struct(fields) => !fields.is_empty(),
+            VariableValue::Option(opt) => opt.is_some(),
+            VariableValue::Reference(_) => true,
+            VariableValue::Null => false,
+            VariableValue::Complex { children, fields, .. } => {
+                !fields.is_empty() || children.as_ref().map_or(false, |c| !c.is_empty())
+            },
+            VariableValue::Vec { elements, .. } => !elements.is_empty(),
+            VariableValue::HashMap { entries, .. } => !entries.is_empty(),
+        }
     }
 }
 
@@ -94,6 +298,186 @@ impl WatchExpression {
     /// Update the value of the watch expression
     pub fn update_value(&mut self, value: &str) {
         self.last_value = Some(value.to_string());
+    }
+    
+    /// Evaluate the expression and return the result as a string
+    pub fn evaluate(&mut self, variables: &VariableInspector) -> String {
+        if !self.enabled {
+            return "[Disabled]".to_string();
+        }
+        
+        // Simple expression evaluator
+        let result = self.evaluate_expression(&self.expression, variables);
+        let value = result.unwrap_or("[Evaluation failed]".to_string());
+        
+        // Update the last value
+        self.last_value = Some(value.clone());
+        
+        value
+    }
+    
+    /// Evaluate an expression and return the result as a string
+    fn evaluate_expression(&self, expression: &str, variables: &VariableInspector) -> Option<String> {
+        // Check if this is a simple variable reference
+        if let Some(var) = variables.get_variable(expression) {
+            return Some(format!("{}", var.value));
+        }
+        
+        // Check for member access (e.g. "person.name")
+        if expression.contains('.') {
+            let parts: Vec<&str> = expression.split('.').collect();
+            if parts.len() >= 2 {
+                let base_var = variables.get_variable(parts[0])?;
+                return self.evaluate_member_access(base_var, &parts[1..], variables);
+            }
+        }
+        
+        // Check for array access (e.g. "array[0]")
+        if expression.contains('[') && expression.contains(']') {
+            let start_bracket = expression.find('[')?;
+            let end_bracket = expression.find(']')?;
+            
+            if start_bracket < end_bracket {
+                let var_name = &expression[0..start_bracket];
+                let index_expr = &expression[start_bracket+1..end_bracket];
+                
+                // Try to parse index as an integer
+                if let Ok(index) = index_expr.parse::<usize>() {
+                    if let Some(var) = variables.get_variable(var_name) {
+                        return self.evaluate_array_access(var, index);
+                    }
+                }
+            }
+        }
+        
+        // For simple expressions like "x + 1", we'll parse and evaluate
+        if let Some(result) = self.evaluate_arithmetic_expression(expression, variables) {
+            return Some(result);
+        }
+        
+        None
+    }
+    
+    /// Evaluate member access expressions like "person.name"
+    fn evaluate_member_access(&self, base_var: &Variable, members: &[&str], variables: &VariableInspector) -> Option<String> {
+        if members.is_empty() {
+            return Some(format!("{}", base_var.value));
+        }
+        
+        match &base_var.value {
+            VariableValue::Struct(fields) => {
+                if let Some(field_value) = fields.get(members[0]) {
+                    if members.len() == 1 {
+                        Some(format!("{}", field_value))
+                    } else {
+                        // Create a temporary variable for continued navigation
+                        let temp_var = Variable::new(
+                            members[0],
+                            "field",
+                            field_value.clone(),
+                            0,
+                            false
+                        );
+                        self.evaluate_member_access(&temp_var, &members[1..], variables)
+                    }
+                } else {
+                    None
+                }
+            }
+            // For other types, we don't support member access
+            _ => None,
+        }
+    }
+    
+    /// Evaluate array access expressions like "array[0]"
+    fn evaluate_array_access(&self, var: &Variable, index: usize) -> Option<String> {
+        match &var.value {
+            VariableValue::Array(array) => {
+                if index < array.len() {
+                    Some(format!("{}", array[index]))
+                } else {
+                    Some(format!("[Index {} out of bounds (len: {})]", index, array.len()))
+                }
+            }
+            // For other types, we don't support array access
+            _ => None,
+        }
+    }
+    
+    /// Evaluate arithmetic expressions like "x + 1"
+    fn evaluate_arithmetic_expression(&self, expression: &str, variables: &VariableInspector) -> Option<String> {
+        // Look for common operators: +, -, *, /, %
+        for op in &["+", "-", "*", "/", "%"] {
+            if expression.contains(op) {
+                let parts: Vec<&str> = expression.split(op).collect();
+                if parts.len() == 2 {
+                    let left = parts[0].trim();
+                    let right = parts[1].trim();
+                    
+                    // Get left value
+                    let left_value = if let Some(var) = variables.get_variable(left) {
+                        self.get_numeric_value(&var.value)
+                    } else if let Ok(val) = left.parse::<f64>() {
+                        Some(val)
+                    } else {
+                        None
+                    };
+                    
+                    // Get right value
+                    let right_value = if let Some(var) = variables.get_variable(right) {
+                        self.get_numeric_value(&var.value)
+                    } else if let Ok(val) = right.parse::<f64>() {
+                        Some(val)
+                    } else {
+                        None
+                    };
+                    
+                    // Perform the operation
+                    if let (Some(left_val), Some(right_val)) = (left_value, right_value) {
+                        let result = match *op {
+                            "+" => left_val + right_val,
+                            "-" => left_val - right_val,
+                            "*" => left_val * right_val,
+                            "/" => {
+                                if right_val != 0.0 {
+                                    left_val / right_val
+                                } else {
+                                    return Some("[Division by zero]".to_string());
+                                }
+                            }
+                            "%" => {
+                                if right_val != 0.0 {
+                                    left_val % right_val
+                                } else {
+                                    return Some("[Modulo by zero]".to_string());
+                                }
+                            }
+                            _ => return None, // Shouldn't happen
+                        };
+                        
+                        // Format based on whether the result is a whole number
+                        if result == (result as i64) as f64 {
+                            return Some(format!("{}", result as i64));
+                        } else {
+                            return Some(format!("{}", result));
+                        }
+                    }
+                }
+            }
+        }
+        
+        None
+    }
+    
+    /// Get numeric value from a variable
+    fn get_numeric_value(&self, value: &VariableValue) -> Option<f64> {
+        match value {
+            VariableValue::Integer(i) => Some(*i as f64),
+            VariableValue::Float(f) => Some(*f),
+            VariableValue::Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
+            VariableValue::Char(c) => Some(*c as u32 as f64),
+            _ => None,
+        }
     }
 }
 
@@ -233,9 +617,9 @@ impl DebuggerRuntime {
     pub fn update_watches(&mut self) {
         for watch in &mut self.watches {
             if watch.enabled {
-                // TODO: Evaluate the expression and update the value
-                // For now, set a placeholder value
-                watch.update_value("[Value not implemented yet]");
+                // Evaluate the expression and update the value
+                let value = watch.evaluate(&self.variable_inspector);
+                println!("Watch #{}: {} = {}", watch.id, watch.expression, value);
             }
         }
     }
@@ -292,5 +676,10 @@ impl DebuggerRuntime {
     /// Get all variables in the current scope
     pub fn get_variables(&self) -> Vec<&Variable> {
         self.variable_inspector.get_all_variables()
+    }
+    
+    /// Visualize a variable in detail, including complex data structures
+    pub fn visualize_variable(&self, name: &str) -> Option<String> {
+        self.variable_inspector.visualize_variable(name)
     }
 } 
