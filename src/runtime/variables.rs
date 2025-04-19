@@ -269,7 +269,8 @@ impl Variable {
     }
 }
 
-/// Handles variable inspection and manipulation
+/// Represents the variable inspector that tracks variables during debugging
+#[derive(Clone)]
 pub struct VariableInspector {
     /// Currently visible variables
     variables: HashMap<String, Variable>,

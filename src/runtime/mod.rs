@@ -6,6 +6,90 @@ pub mod flow_control;
 pub use variables::{Variable, VariableValue, VariableInspector};
 pub use flow_control::{ExecutionState, FlowControl, ExecutionPoint, FlowController};
 
+use std::sync::atomic::{AtomicU8, Ordering};
+use crate::errors::DbugResult;
+use std::sync::{Arc, Mutex};
+use once_cell::sync::Lazy;
+
+// Flow control constants
+static FLOW_CONTROL: AtomicU8 = AtomicU8::new(0);
+
+const FLOW_CONTINUE: u8 = 0;
+const FLOW_STEP_OVER: u8 = 1;
+const FLOW_STEP_INTO: u8 = 2;
+const FLOW_STEP_OUT: u8 = 3;
+
+/// Global runtime instance
+static DEBUGGER_RUNTIME: Lazy<Arc<Mutex<DebuggerRuntime>>> = Lazy::new(|| {
+    Arc::new(Mutex::new(DebuggerRuntime::new()))
+});
+
+/// Gets a reference to the global runtime
+fn get_global_runtime() -> std::sync::MutexGuard<'static, DebuggerRuntime> {
+    DEBUGGER_RUNTIME.lock().unwrap_or_else(|e| {
+        panic!("Failed to lock global runtime: {}", e);
+    })
+}
+
+/// Sets the flow control to continue execution
+pub fn set_continue() -> DbugResult<()> {
+    set_flow_control(FlowControl::Continue)
+}
+
+/// Sets the flow control to step over
+pub fn set_step_over() -> DbugResult<()> {
+    set_flow_control(FlowControl::StepOver)
+}
+
+/// Sets the flow control to step into
+pub fn set_step_into() -> DbugResult<()> {
+    set_flow_control(FlowControl::StepInto)
+}
+
+/// Sets the flow control to step out
+pub fn set_step_out() -> DbugResult<()> {
+    set_flow_control(FlowControl::StepOut)
+}
+
+/// Sets the flow control
+pub fn set_flow_control(control: FlowControl) -> DbugResult<()> {
+    let value = match control {
+        FlowControl::Continue => FLOW_CONTINUE,
+        FlowControl::StepOver => FLOW_STEP_OVER,
+        FlowControl::StepInto => FLOW_STEP_INTO,
+        FlowControl::StepOut => FLOW_STEP_OUT,
+        _ => FLOW_CONTINUE, // Default to continue for other values
+    };
+    
+    FLOW_CONTROL.store(value, Ordering::SeqCst);
+    Ok(())
+}
+
+/// Gets the current flow control
+pub fn get_flow_control() -> FlowControl {
+    match FLOW_CONTROL.load(Ordering::SeqCst) {
+        FLOW_STEP_OVER => FlowControl::StepOver,
+        FLOW_STEP_INTO => FlowControl::StepInto,
+        FLOW_STEP_OUT => FlowControl::StepOut,
+        _ => FlowControl::Continue,
+    }
+}
+
+/// Gets the current variables in scope
+pub fn get_current_variables() -> DbugResult<VariableInspector> {
+    // This is a simplified implementation that uses a global runtime
+    // In a real system, this would fetch variables from the debugged process
+    let runtime = get_global_runtime();
+    Ok(runtime.variable_inspector.clone())
+}
+
+/// Evaluates an expression in the current context
+pub fn evaluate_expression(expression: &str, variables: &VariableInspector) -> Option<String> {
+    // Create a temporary watch and evaluate it
+    let mut temp_watch = WatchExpression::new(expression, 0);
+    Some(temp_watch.evaluate(variables))
+}
+
 /// Helper function for evaluating member access expressions
 /// Split out to avoid clippy warnings about recursion parameters
 fn evaluate_member_access_helper(base_var: &Variable, members: &[&str]) -> Option<String> {

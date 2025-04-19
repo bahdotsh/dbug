@@ -10,10 +10,8 @@ pub enum ExecutionState {
     /// The program is paused at a breakpoint
     Paused,
     /// The program has completed execution
-    #[allow(dead_code)]
     Completed,
     /// The program has terminated with an error
-    #[allow(dead_code)]
     Error,
 }
 
@@ -27,10 +25,8 @@ pub enum FlowControl {
     /// Step to the next line, stepping into function calls
     StepInto,
     /// Step out of the current function
-    #[allow(dead_code)]
     StepOut,
     /// Run to the cursor position
-    #[allow(dead_code)]
     RunToCursor,
     /// Stop execution
     Stop,
@@ -48,7 +44,6 @@ pub struct ExecutionPoint {
     /// The function name
     pub function: String,
     /// The stack depth
-    #[allow(dead_code)]
     pub stack_depth: u32,
 }
 
@@ -75,7 +70,6 @@ pub struct StackFrame {
     /// The line number
     pub line: u32,
     /// Local variables in this frame
-    #[allow(dead_code)]
     pub variables: Vec<String>,
 }
 
@@ -91,7 +85,6 @@ impl StackFrame {
     }
 
     /// Add a variable to this stack frame
-    #[allow(dead_code)]
     pub fn add_variable(&mut self, variable: &str) {
         self.variables.push(variable.to_string());
     }
@@ -116,21 +109,23 @@ impl CallStack {
     }
 
     /// Push a new frame onto the stack
-    #[allow(dead_code)]
     pub fn push_frame(&mut self, frame: StackFrame) {
         self.frames.push(frame);
     }
 
     /// Pop the top frame from the stack
-    #[allow(dead_code)]
     pub fn pop_frame(&mut self) -> Option<StackFrame> {
         self.frames.pop()
     }
 
     /// Get the current frame
-    #[allow(dead_code)]
     pub fn current_frame(&self) -> Option<&StackFrame> {
         self.frames.last()
+    }
+    
+    /// Get a mutable reference to the current frame
+    pub fn current_frame_mut(&mut self) -> Option<&mut StackFrame> {
+        self.frames.last_mut()
     }
 
     /// Get all frames in the stack
@@ -186,7 +181,6 @@ impl FlowController {
     }
 
     /// Pause program execution
-    #[allow(dead_code)]
     pub fn pause(&mut self) {
         self.state = ExecutionState::Paused;
     }
@@ -206,14 +200,12 @@ impl FlowController {
     }
 
     /// Complete program execution normally
-    #[allow(dead_code)]
     pub fn complete(&mut self) {
         self.state = ExecutionState::Completed;
         self.next_action = FlowControl::Stop;
     }
 
     /// Terminate program execution with an error
-    #[allow(dead_code)]
     pub fn error(&mut self) {
         self.state = ExecutionState::Error;
         self.next_action = FlowControl::Stop;
@@ -231,10 +223,24 @@ impl FlowController {
     }
 
     /// Enter a function, pushing a new frame onto the call stack
-    #[allow(dead_code)]
     pub fn enter_function(&mut self, function: &str, file: &str, line: u32) {
+        // Create a new stack frame
         let frame = StackFrame::new(function, file, line);
+        
+        // Push it onto the call stack
         self.call_stack.push_frame(frame);
+        
+        // Update the current execution point
+        if let Some(current_point) = &mut self.current_point {
+            current_point.function = function.to_string();
+            current_point.file = file.to_string();
+            current_point.line = line;
+            current_point.stack_depth = self.call_stack.depth() as u32;
+        } else {
+            self.current_point = Some(ExecutionPoint::new(
+                file, line, 0, function, self.call_stack.depth() as u32
+            ));
+        }
         
         // If we're stepping into, pause when entering a function
         if self.next_action == FlowControl::StepInto {
@@ -243,24 +249,43 @@ impl FlowController {
     }
 
     /// Exit a function, popping the top frame from the call stack
-    #[allow(dead_code)]
-    pub fn exit_function(&mut self) {
-        self.call_stack.pop_frame();
+    pub fn exit_function(&mut self) -> Option<StackFrame> {
+        // Pop the top frame from the call stack
+        let frame = self.call_stack.pop_frame();
+        
+        // Update the current execution point to the previous frame
+        if let Some(parent_frame) = self.call_stack.current_frame() {
+            self.current_point = Some(ExecutionPoint::new(
+                &parent_frame.file,
+                parent_frame.line,
+                0,
+                &parent_frame.function,
+                self.call_stack.depth() as u32
+            ));
+        }
         
         // If we're stepping out, pause when exiting a function
-        if self.next_action == FlowControl::StepOut && !self.call_stack.get_frames().is_empty() {
+        if self.next_action == FlowControl::StepOut {
             self.state = ExecutionState::Paused;
+            self.next_action = FlowControl::Continue;
+        }
+        
+        frame
+    }
+    
+    /// Add a variable to the current stack frame
+    pub fn add_variable_to_current_frame(&mut self, variable: &str) {
+        if let Some(frame) = self.call_stack.current_frame_mut() {
+            frame.add_variable(variable);
         }
     }
 
     /// Get the current execution state
-    #[allow(dead_code)]
     pub fn get_state(&self) -> ExecutionState {
         self.state
     }
 
     /// Get the next flow control action
-    #[allow(dead_code)]
     pub fn get_next_action(&self) -> FlowControl {
         self.next_action
     }

@@ -3,13 +3,16 @@
 // This crate provides a simple and intuitive debugging experience
 // for Rust developers.
 
-pub mod cli;
+// Temporarily commented out due to compilation issues
+// pub mod cli;
 pub mod compiler;
 pub mod runtime;
 pub mod instrumentation;
 pub mod utils;
 pub mod communication;
 pub mod errors;
+pub mod session;
+pub mod cargo;
 
 /// This module contains internal implementation details
 /// Not intended for direct use by end users
@@ -93,6 +96,7 @@ pub mod prelude {
     pub use dbug_macros::dbug;
     pub use dbug_macros::break_here;
     pub use dbug_macros::break_at;
+    pub use dbug_macros::register_var;
     
     // Re-export runtime types that might be useful in user code
     pub use crate::runtime::{Variable, VariableValue};

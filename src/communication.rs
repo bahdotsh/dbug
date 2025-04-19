@@ -61,6 +61,13 @@ pub enum DebuggerMessage {
     },
     /// Multiple messages batched together for efficiency
     BatchedMessages(Vec<DebuggerMessage>),
+    /// Expression result
+    ExpressionResult {
+        /// The expression
+        expression: String,
+        /// The result
+        result: String,
+    },
 }
 
 /// A response from the debugger to the instrumented code
@@ -373,7 +380,7 @@ pub fn wait_for_response() -> DbugResult<Option<DebuggerResponse>> {
 
 /// Process a debug point in the code
 pub fn process_debug_point(file: &str, line: u32, column: u32, function: &str) -> DbugResult<()> {
-    // Send a breakpoint hit message
+    // Create the breakpoint hit message
     let message = DebuggerMessage::BreakpointHit {
         file: file.to_string(),
         line,
@@ -381,33 +388,63 @@ pub fn process_debug_point(file: &str, line: u32, column: u32, function: &str) -
         function: function.to_string(),
     };
     
+    // Send the message to the debugger
     send_message(message)?;
     
     // Wait for a response
-    match wait_for_response()? {
-        Some(DebuggerResponse::Continue) => {
-            // Just continue
-        }
-        Some(DebuggerResponse::StepOver) => {
-            // Continue with step over
-        }
-        Some(DebuggerResponse::StepInto) => {
-            // Continue with step into
-        }
-        Some(DebuggerResponse::StepOut) => {
-            // Continue with step out
-        }
-        Some(DebuggerResponse::Evaluate { expression }) => {
-            // TODO: Evaluate the expression
-            // For now, just ignore it
-            println!("Evaluation not implemented: {}", expression);
-        }
-        None => {
-            // No response, just continue
+    if let Some(response) = wait_for_response()? {
+        match response {
+            DebuggerResponse::Continue => {
+                // Just continue execution
+            },
+            DebuggerResponse::StepOver => {
+                // Set step-over flag in the runtime
+                if let Err(e) = crate::runtime::set_step_over() {
+                    eprintln!("[DBUG] Error setting step over: {}", e);
+                }
+            },
+            DebuggerResponse::StepInto => {
+                // Set step-into flag in the runtime
+                if let Err(e) = crate::runtime::set_step_into() {
+                    eprintln!("[DBUG] Error setting step into: {}", e);
+                }
+            },
+            DebuggerResponse::StepOut => {
+                // Set step-out flag in the runtime
+                if let Err(e) = crate::runtime::set_step_out() {
+                    eprintln!("[DBUG] Error setting step out: {}", e);
+                }
+            },
+            DebuggerResponse::Evaluate { expression } => {
+                // Implement the expression evaluation
+                if let Err(e) = evaluate_expression(&expression) {
+                    eprintln!("[DBUG] Error evaluating expression: {}", e);
+                }
+            },
         }
     }
     
     Ok(())
+}
+
+/// Evaluates an expression in the current context and sends the result back to the debugger
+fn evaluate_expression(expression: &str) -> DbugResult<()> {
+    // Get the current variable scope from the runtime
+    let variables = crate::runtime::get_current_variables()?;
+    
+    // Use the runtime's expression evaluator
+    let result = match crate::runtime::evaluate_expression(expression, &variables) {
+        Some(value) => value,
+        None => format!("Could not evaluate expression: {}", expression),
+    };
+    
+    // Send the result back to the debugger
+    let message = DebuggerMessage::ExpressionResult {
+        expression: expression.to_string(),
+        result,
+    };
+    
+    send_message(message)
 }
 
 /// Notify the debugger that a function has been entered
@@ -440,4 +477,43 @@ pub fn notify_variable_changed(name: &str, type_name: &str, value: &str, is_muta
     };
     
     queue_message(message)
+}
+
+/// Initialize the communication channel for a debugging session
+pub fn init_debugging_session() -> DbugResult<()> {
+    // Initialize the communication channel
+    // This would be called at the start of a debugging session
+    let _channel = COMMUNICATION_CHANNEL.lock().map_err(|_| {
+        DbugError::CommunicationError("Failed to lock communication channel".to_string())
+    })?;
+    
+    // Nothing else to do here as the channel is lazily initialized
+    println!("[DBUG] Communication channel initialized");
+    Ok(())
+}
+
+/// Clean up the communication channel after a debugging session
+pub fn cleanup_debugging_session() -> DbugResult<()> {
+    // Clean up the communication channel
+    // This would be called at the end of a debugging session
+    let mut channel = COMMUNICATION_CHANNEL.lock().map_err(|_| {
+        DbugError::CommunicationError("Failed to lock communication channel".to_string())
+    })?;
+    
+    channel.close()?;
+    println!("[DBUG] Communication channel cleaned up");
+    Ok(())
+}
+
+/// Check for incoming messages from the debugged process
+pub fn check_for_messages() -> DbugResult<Option<DebuggerMessage>> {
+    // Try to read a message from the channel
+    // This is a non-blocking operation
+    let _channel = COMMUNICATION_CHANNEL.lock().map_err(|_| {
+        DbugError::CommunicationError("Failed to lock communication channel".to_string())
+    })?;
+    
+    // In a real implementation, this would check a queue or similar
+    // For now, we'll just return None to indicate no messages
+    Ok(None)
 } 

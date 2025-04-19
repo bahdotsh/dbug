@@ -2,12 +2,10 @@ use std::path::Path;
 use std::process::{Command, exit};
 use std::io::{self, Write};
 use clap::{Parser, Subcommand};
+use dbug::{self, cargo, communication, session};
 
-mod cli;
-mod compiler;
-mod runtime;
-mod instrumentation;
-mod utils;
+// Temporarily commented out due to compilation issues
+// mod cli;
 
 #[derive(Parser)]
 #[command(name = "dbug")]
@@ -74,19 +72,18 @@ fn main() {
     }
 }
 
-fn build_project(project_path: &str, release: bool, target_dir: Option<&str>) {
+fn build_project(project_path: &str, release: bool, _target_dir: Option<&str>) {
     println!("Building project at: {}", project_path);
     
     // Check if the project is valid
-    let cargo_toml_path = Path::new(project_path).join("Cargo.toml");
-    if !cargo_toml_path.exists() {
+    if !dbug::cargo::is_cargo_project(project_path) {
         println!("Error: Invalid Rust project at '{}' (no Cargo.toml found)", project_path);
         exit(1);
     }
     
     // Find all Rust files in the project
     println!("Scanning project for Rust files...");
-    let rust_files = match utils::find_rust_files(project_path) {
+    let rust_files = match dbug::utils::find_rust_files(project_path) {
         Ok(files) => files,
         Err(e) => {
             println!("Error scanning project: {}", e);
@@ -97,7 +94,7 @@ fn build_project(project_path: &str, release: bool, target_dir: Option<&str>) {
     println!("Found {} Rust files", rust_files.len());
     
     // Create the instrumenter
-    let instrumenter = instrumentation::Instrumenter::new(project_path);
+    let instrumenter = dbug::instrumentation::Instrumenter::new(project_path);
     
     // Find debug points in all files
     println!("Scanning for debug points...");
@@ -122,29 +119,18 @@ fn build_project(project_path: &str, release: bool, target_dir: Option<&str>) {
     
     println!("Found {} debug points total", all_debug_points);
     
-    // Build the project
+    // Build the project with instrumentation
     println!("Building project...");
     
-    let mut cmd = Command::new("cargo");
-    cmd.current_dir(project_path);
-    cmd.arg("build");
-    
-    if release {
-        cmd.arg("--release");
+    match dbug::cargo::build_with_instrumentation(project_path, release) {
+        Ok(_) => {
+            println!("Build successful! Project is ready for debugging.");
+        },
+        Err(e) => {
+            println!("Error building project: {}", e);
+            exit(1);
+        }
     }
-    
-    if let Some(dir) = target_dir {
-        cmd.args(["--target-dir", dir]);
-    }
-    
-    let status = cmd.status().expect("Failed to execute cargo build");
-    
-    if !status.success() {
-        println!("Error: Build failed");
-        exit(status.code().unwrap_or(1));
-    }
-    
-    println!("Build successful! Project is ready for debugging.");
 }
 
 fn run_project(project_path: &str, release: bool) {
@@ -154,21 +140,47 @@ fn run_project(project_path: &str, release: bool) {
     build_project(project_path, release, None);
     
     // For now, just pass through to cargo run
-    println!("Starting debugger...");
-    println!("Note: Full debugging capabilities will be implemented in future versions.");
+    println!("Starting application with debug instrumentation...");
     
-    let mut cmd = Command::new("cargo");
-    cmd.current_dir(project_path);
-    cmd.arg("run");
-    
-    if release {
-        cmd.arg("--release");
+    // Initialize the communication channel
+    if let Err(e) = dbug::communication::init_debugging_session() {
+        println!("Error initializing debugging session: {}", e);
+        exit(1);
     }
     
-    let status = cmd.status().expect("Failed to execute cargo run");
+    // Find the executable path
+    let target_dir = if release { "release" } else { "debug" };
+    let project_name = match dbug::cargo::get_project_name(project_path) {
+        Ok(name) => name,
+        Err(e) => {
+            println!("Error getting project name: {}", e);
+            exit(1);
+        }
+    };
+    
+    let executable_path = Path::new(project_path)
+        .join("target")
+        .join(target_dir)
+        .join(&project_name);
+    
+    // Run the executable directly with debugging enabled
+    let status = match Command::new(&executable_path)
+        .env("DBUG_ENABLED", "1")
+        .status() {
+            Ok(status) => status,
+            Err(e) => {
+                println!("Error launching executable: {}", e);
+                exit(1);
+            }
+        };
+    
+    // Clean up
+    if let Err(e) = dbug::communication::cleanup_debugging_session() {
+        println!("Error cleaning up debugging session: {}", e);
+    }
     
     if !status.success() {
-        println!("Error: Run failed");
+        println!("Error: Run failed with exit code: {}", status.code().unwrap_or(1));
         exit(status.code().unwrap_or(1));
     }
 }
@@ -176,19 +188,96 @@ fn run_project(project_path: &str, release: bool) {
 fn debug_project(project_path: &str, release: bool) {
     println!("Debugging project at: {}", project_path);
     
-    // Build first
-    build_project(project_path, release, None);
+    // Check if the project is valid
+    if !dbug::cargo::is_cargo_project(project_path) {
+        println!("Error: Invalid Rust project at '{}' (no Cargo.toml found)", project_path);
+        exit(1);
+    }
     
-    // Initialize the debugger
-    println!("Starting debugger...");
-    println!("Note: Full debugging capabilities will be implemented in future versions.");
+    // Initialize a debugging session
+    match dbug::session::get_current_session() {
+        Ok(session) => {
+            let mut session = session.lock().unwrap();
+            if let Err(e) = session.start(project_path) {
+                println!("Error starting debugging session: {}", e);
+                exit(1);
+            }
+        },
+        Err(e) => {
+            println!("Error getting debugging session: {}", e);
+            exit(1);
+        }
+    }
     
-    // Create and start the debugger CLI
-    let mut debugger_cli = cli::DebuggerCli::new();
-    debugger_cli.start();
+    // Build with instrumentation
+    if let Err(e) = dbug::cargo::build_with_instrumentation(project_path, release) {
+        println!("Error building project: {}", e);
+        exit(1);
+    }
+    
+    // Find the executable path
+    let target_dir = if release { "release" } else { "debug" };
+    let project_name = match dbug::cargo::get_project_name(project_path) {
+        Ok(name) => name,
+        Err(e) => {
+            println!("Error getting project name: {}", e);
+            exit(1);
+        }
+    };
+    
+    let executable_path = Path::new(project_path)
+        .join("target")
+        .join(target_dir)
+        .join(&project_name);
+    
+    println!("Starting debugger for: {}", executable_path.display());
+    
+    // Initialize the communication channel
+    if let Err(e) = dbug::communication::init_debugging_session() {
+        println!("Error initializing debugging session: {}", e);
+        exit(1);
+    }
+    
+    // Create a simple debugger (since the CLI module is temporarily disabled)
+    println!("NOTE: Simple debugging mode active (CLI module temporarily disabled)");
+    
+    // Set the executable in the session
+    if let Ok(session) = dbug::session::get_current_session() {
+        let mut session = session.lock().unwrap();
+        if let Err(e) = session.set_executable(&executable_path) {
+            println!("Warning: Could not set executable path: {}", e);
+        }
+    }
+    
+    // Launch the executable in a separate process
+    let child_process = match std::process::Command::new(&executable_path)
+        .env("DBUG_ENABLED", "1") // Signal to the program that it's being debugged
+        .spawn() {
+            Ok(child) => child,
+            Err(e) => {
+                println!("Error launching executable: {}", e);
+                // Clean up
+                dbug::communication::cleanup_debugging_session().unwrap_or_else(|e| {
+                    println!("Error cleaning up debugging session: {}", e);
+                });
+                exit(1);
+            }
+        };
+    
+    // Store the child process ID in the session
+    let pid = child_process.id();
+    println!("Debugging process with PID: {}", pid);
+    
+    if let Ok(session) = dbug::session::get_current_session() {
+        let mut session = session.lock().unwrap();
+        if let Err(e) = session.set_debugged_pid(pid) {
+            println!("Warning: Could not set debugged PID: {}", e);
+        }
+    }
     
     // Main debugging loop
     let mut command = String::new();
+    println!("Type 'quit' to exit. Other commands temporarily disabled.");
     loop {
         print!("dbug> ");
         io::stdout().flush().unwrap();
@@ -196,13 +285,51 @@ fn debug_project(project_path: &str, release: bool) {
         command.clear();
         io::stdin().read_line(&mut command).unwrap();
         
-        // Process the command
-        debugger_cli.process_command(&command);
-        
-        // Check if we should exit
+        // Simplified command handling
         match command.trim() {
-            "quit" | "q" => break,
-            _ => {} // Continue the loop
+            "quit" | "q" => {
+                println!("Terminating debugging session...");
+                
+                // Terminate the child process
+                if let Ok(session) = dbug::session::get_current_session() {
+                    if let Err(e) = session.lock().unwrap().stop() {
+                        println!("Warning: Could not properly stop debugging session: {}", e);
+                    }
+                }
+                
+                // Clean up
+                if let Err(e) = dbug::communication::cleanup_debugging_session() {
+                    println!("Error cleaning up debugging session: {}", e);
+                }
+                
+                break;
+            },
+            "help" | "h" => {
+                println!("Simple debugging mode commands:");
+                println!("  quit, q - Exit the debugger");
+                println!("Note: Full debugger functionality is temporarily disabled");
+            },
+            _ => {
+                println!("Unknown command or command temporarily disabled. Type 'quit' to exit.");
+            }
+        }
+        
+        // Check for breakpoint events
+        match dbug::communication::check_for_messages() {
+            Ok(Some(msg)) => {
+                match msg {
+                    dbug::communication::DebuggerMessage::BreakpointHit { file, line, column, function } => {
+                        println!("Breakpoint hit at {}:{}:{} in function {}", file, line, column, function);
+                    },
+                    _ => {
+                        println!("Received message from debuggee");
+                    }
+                }
+            },
+            Err(e) => {
+                println!("Error checking for messages: {}", e);
+            },
+            _ => {}
         }
     }
     
