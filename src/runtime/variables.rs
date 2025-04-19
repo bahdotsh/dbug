@@ -241,6 +241,19 @@ impl VariableValue {
     }
 }
 
+/// Variable change status to track modifications
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChangeStatus {
+    /// Variable is unchanged
+    Unchanged,
+    /// Variable is newly created
+    New,
+    /// Variable value has changed
+    Modified,
+    /// A child of this variable has changed (for complex types)
+    ChildModified,
+}
+
 /// A variable in the debugged program
 #[derive(Debug, Clone)]
 pub struct Variable {
@@ -248,12 +261,18 @@ pub struct Variable {
     pub name: String,
     /// The type of the variable
     pub type_name: String,
-    /// The current value of the variable
+    /// The value of the variable
     pub value: VariableValue,
     /// The scope level (useful for determining variable shadowing)
     pub scope_level: u32,
     /// Whether the variable is mutable
     pub is_mutable: bool,
+    /// Previous value for change detection
+    pub previous_value: Option<VariableValue>,
+    /// Change status of this variable
+    pub change_status: ChangeStatus,
+    /// Last update timestamp
+    pub last_updated: std::time::Instant,
 }
 
 impl Variable {
@@ -265,7 +284,37 @@ impl Variable {
             value,
             scope_level,
             is_mutable,
+            previous_value: None,
+            change_status: ChangeStatus::New,
+            last_updated: std::time::Instant::now(),
         }
+    }
+    
+    /// Update the value of the variable
+    pub fn update_value(&mut self, new_value: VariableValue) {
+        // Store the previous value
+        self.previous_value = Some(self.value.clone());
+        // Update the value
+        self.value = new_value;
+        // Set the change status
+        self.change_status = ChangeStatus::Modified;
+        // Update the timestamp
+        self.last_updated = std::time::Instant::now();
+    }
+    
+    /// Reset the change status
+    pub fn reset_change_status(&mut self) {
+        self.change_status = ChangeStatus::Unchanged;
+    }
+    
+    /// Check if the variable has changed
+    pub fn has_changed(&self) -> bool {
+        self.change_status != ChangeStatus::Unchanged
+    }
+    
+    /// Get the time since last update
+    pub fn time_since_update(&self) -> std::time::Duration {
+        self.last_updated.elapsed()
     }
 }
 
@@ -276,6 +325,8 @@ pub struct VariableInspector {
     variables: HashMap<String, Variable>,
     /// Current scope level
     current_scope: u32,
+    /// Variables that have changed in the last update
+    changed_variables: Vec<String>,
 }
 
 impl Default for VariableInspector {
@@ -290,6 +341,7 @@ impl VariableInspector {
         Self {
             variables: HashMap::new(),
             current_scope: 0,
+            changed_variables: Vec::new(),
         }
     }
 
@@ -317,19 +369,38 @@ impl VariableInspector {
         self.current_scope = self.current_scope.saturating_sub(1);
     }
 
-    /// Update a variable's value
-    #[allow(dead_code)]
+    /// Check if two variable values are equal (helper method)
+    fn are_values_equal(val1: &VariableValue, val2: &VariableValue) -> bool {
+        match (val1, val2) {
+            (VariableValue::Integer(i1), VariableValue::Integer(i2)) => i1 == i2,
+            (VariableValue::Float(f1), VariableValue::Float(f2)) => (f1 - f2).abs() < std::f64::EPSILON,
+            (VariableValue::Boolean(b1), VariableValue::Boolean(b2)) => b1 == b2,
+            (VariableValue::String(s1), VariableValue::String(s2)) => s1 == s2,
+            (VariableValue::Char(c1), VariableValue::Char(c2)) => c1 == c2,
+            (VariableValue::Null, VariableValue::Null) => true,
+            // For complex types, we just do a reference comparison
+            // A more sophisticated implementation would recursively compare structure
+            _ => false,
+        }
+    }
+
+    /// Update a variable or register a new one if it doesn't exist
     pub fn update_variable(&mut self, name: &str, value: VariableValue) -> Result<(), String> {
         if let Some(var) = self.variables.get_mut(name) {
-            if var.is_mutable {
-                var.value = value;
-                Ok(())
-            } else {
-                Err(format!("Cannot modify immutable variable '{}'", name))
+            // Only update if mutable or changing to the same value (for immutable vars)
+            if var.is_mutable || !Self::are_values_equal(&var.value, &value) {
+                var.update_value(value);
+                self.changed_variables.push(name.to_string());
             }
+            Ok(())
         } else {
-            Err(format!("Variable '{}' not found", name))
+            Err(format!("Variable {} not found", name))
         }
+    }
+
+    /// Compare two variable values for equality
+    fn values_equal(&self, val1: &VariableValue, val2: &VariableValue) -> bool {
+        Self::are_values_equal(val1, val2)
     }
 
     /// Get all variables currently in scope
@@ -344,88 +415,129 @@ impl VariableInspector {
         Some(self.create_detailed_visualization(var))
     }
     
-    /// Create a detailed visualization of a variable
-    #[allow(dead_code)]
+    /// Creates detailed visualization of a variable with better type support
     fn create_detailed_visualization(&self, var: &Variable) -> String {
-        let mut result = format!("Variable: {} ({})\n", var.name, var.type_name);
-        result.push_str(&format!("Mutability: {}\n", if var.is_mutable { "mutable" } else { "immutable" }));
-        result.push_str("Value: ");
+        let mut result = format!("{}: {} = {}", var.name, var.type_name, var.value);
         
+        // Add additional type-specific details
         match &var.value {
+            VariableValue::Vec { elements, length, capacity } => {
+                result.push_str(&format!("\n  Length: {}", length));
+                result.push_str(&format!("\n  Capacity: {}", capacity));
+                
+                // Show first few elements with indices
+                if !elements.is_empty() {
+                    result.push_str("\n  Elements:");
+                    for (i, element) in elements.iter().take(10).enumerate() {
+                        result.push_str(&format!("\n    [{}]: {}", i, element));
+                    }
+                    
+                    if elements.len() > 10 {
+                        result.push_str(&format!("\n    ... and {} more elements", elements.len() - 10));
+                    }
+                }
+            },
+            VariableValue::HashMap { entries, size, capacity } => {
+                result.push_str(&format!("\n  Size: {}", size));
+                result.push_str(&format!("\n  Capacity: {}", capacity));
+                
+                // Show key-value pairs
+                if !entries.is_empty() {
+                    result.push_str("\n  Entries:");
+                    for (i, (key, value)) in entries.iter().take(10).enumerate() {
+                        result.push_str(&format!("\n    {}: {} => {}", i, key, value));
+                    }
+                    
+                    if entries.len() > 10 {
+                        result.push_str(&format!("\n    ... and {} more entries", entries.len() - 10));
+                    }
+                }
+            },
+            VariableValue::Struct(fields) => {
+                if !fields.is_empty() {
+                    result.push_str("\n  Fields:");
+                    for (name, value) in fields {
+                        result.push_str(&format!("\n    {}: {}", name, value));
+                    }
+                }
+            },
             VariableValue::Complex { type_name, summary, fields, children } => {
-                result.push_str(&format!("{} {{\n", type_name));
-                result.push_str(&format!("  Summary: {}\n", summary));
+                result.push_str(&format!("\n  Type: {}", type_name));
+                result.push_str(&format!("\n  Summary: {}", summary));
                 
                 if !fields.is_empty() {
-                    result.push_str("  Fields:\n");
+                    result.push_str("\n  Fields:");
                     for (name, value) in fields {
-                        result.push_str(&format!("    {}: {}\n", name, value));
+                        result.push_str(&format!("\n    {}: {}", name, value));
                     }
                 }
                 
-                if let Some(elems) = children {
-                    if !elems.is_empty() {
-                        result.push_str(&format!("  Elements ({}):\n", elems.len()));
-                        for (i, elem) in elems.iter().enumerate() {
-                            if i >= 10 && elems.len() > 12 {
-                                result.push_str(&format!("    ... ({} more elements)\n", elems.len() - i));
-                                break;
-                            }
-                            result.push_str(&format!("    [{}]: {}\n", i, elem));
-                        }
-                    }
-                }
-                
-                result.push('}');
-            }
-            VariableValue::Vec { elements, length, capacity } => {
-                result.push_str(&format!("Vec<{}> (len: {}, capacity: {})\n", 
+                if let Some(elements) = children {
                     if !elements.is_empty() {
-                        
-                        match &elements[0] {
-                            VariableValue::Integer(_) => "i64",
-                            VariableValue::Float(_) => "f64",
-                            VariableValue::Boolean(_) => "bool",
-                            VariableValue::String(_) => "String",
-                            VariableValue::Char(_) => "char",
-                            _ => "T",
+                        result.push_str("\n  Elements:");
+                        for (i, element) in elements.iter().take(10).enumerate() {
+                            result.push_str(&format!("\n    [{}]: {}", i, element));
                         }
-                    } else {
-                        "T"
+                        
+                        if elements.len() > 10 {
+                            result.push_str(&format!("\n    ... and {} more elements", elements.len() - 10));
+                        }
+                    }
+                }
+            },
+            VariableValue::Option(opt) => {
+                match opt {
+                    Some(value) => {
+                        result.push_str("\n  Contains value:");
+                        result.push_str(&format!("\n    {}", value));
                     },
-                    length, capacity));
-                
-                for (i, elem) in elements.iter().enumerate() {
-                    if i >= 15 && elements.len() > 17 {
-                        result.push_str(&format!("  ... ({} more elements)\n", elements.len() - i));
-                        break;
+                    None => {
+                        result.push_str("\n  Contains no value (None)");
                     }
-                    result.push_str(&format!("  [{}]: {}\n", i, elem));
                 }
-            }
-            VariableValue::HashMap { entries, size, capacity } => {
-                result.push_str(&format!("HashMap (size: {}, capacity: {})\n", size, capacity));
+            },
+            VariableValue::Reference(value) => {
+                result.push_str("\n  Reference to:");
+                result.push_str(&format!("\n    {}", value));
+            },
+            VariableValue::Array(elements) => {
+                result.push_str(&format!("\n  Length: {}", elements.len()));
                 
-                for (i, (key, value)) in entries.iter().enumerate() {
-                    if i >= 15 && entries.len() > 17 {
-                        result.push_str(&format!("  ... ({} more entries)\n", entries.len() - i));
-                        break;
+                // Show elements with indices
+                if !elements.is_empty() {
+                    result.push_str("\n  Elements:");
+                    for (i, element) in elements.iter().take(10).enumerate() {
+                        result.push_str(&format!("\n    [{}]: {}", i, element));
                     }
-                    result.push_str(&format!("  {}: {}\n", key, value));
+                    
+                    if elements.len() > 10 {
+                        result.push_str(&format!("\n    ... and {} more elements", elements.len() - 10));
+                    }
                 }
-            }
-            VariableValue::Struct(fields) => {
-                result.push_str("{\n");
-                for (name, value) in fields {
-                    result.push_str(&format!("  {}: {}\n", name, value));
-                }
-                result.push('}');
-            }
-            _ => {
-                result.push_str(&format!("{}", var.value));
-            }
+            },
+            // For primitive types, the default representation is sufficient
+            _ => {}
         }
         
         result
+    }
+
+    /// Get all variables that have changed since last check
+    pub fn get_changed_variables(&mut self) -> Vec<&Variable> {
+        let changed = self.changed_variables.clone();
+        self.changed_variables.clear();
+        
+        // Get the variables from their names
+        changed.iter()
+            .filter_map(|name| self.variables.get(name))
+            .collect()
+    }
+    
+    /// Reset all change statuses
+    pub fn reset_change_status(&mut self) {
+        for var in self.variables.values_mut() {
+            var.reset_change_status();
+        }
+        self.changed_variables.clear();
     }
 } 

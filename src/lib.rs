@@ -13,6 +13,7 @@ pub mod communication;
 pub mod errors;
 pub mod session;
 pub mod cargo;
+pub mod source;
 
 /// This module contains internal implementation details
 /// Not intended for direct use by end users

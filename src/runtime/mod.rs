@@ -2,12 +2,14 @@
 
 pub mod variables;
 pub mod flow_control;
+pub mod type_visualization;
 
-pub use variables::{Variable, VariableValue, VariableInspector};
+pub use variables::{Variable, VariableValue, VariableInspector, ChangeStatus};
 pub use flow_control::{ExecutionState, FlowControl, ExecutionPoint, FlowController};
+pub use type_visualization::TypeVisualizer;
 
 use std::sync::atomic::{AtomicU8, Ordering};
-use crate::errors::DbugResult;
+use crate::errors::{DbugResult, DbugError};
 use std::sync::{Arc, Mutex};
 use once_cell::sync::Lazy;
 
@@ -129,6 +131,66 @@ fn evaluate_member_access_helper(base_var: &Variable, members: &[&str]) -> Optio
     None
 }
 
+/// Condition mode for breakpoints
+#[derive(Debug, Clone, PartialEq)]
+pub enum BreakpointConditionMode {
+    /// Always break when hit
+    Always,
+    /// Break when the condition expression evaluates to true
+    ConditionalExpression(String),
+    /// Break when hit count meets the criteria
+    HitCount(HitCountCondition),
+    /// Break when both condition and hit count criteria are met
+    Combined {
+        /// The condition expression
+        expression: String,
+        /// The hit count condition
+        hit_count: HitCountCondition,
+    },
+}
+
+/// Hit count condition for breakpoints
+#[derive(Debug, Clone, PartialEq)]
+pub enum HitCountCondition {
+    /// Break when hit count equals the target
+    Equals(u32),
+    /// Break when hit count is greater than the target
+    GreaterThan(u32),
+    /// Break when hit count is a multiple of the target
+    Multiple(u32),
+}
+
+impl HitCountCondition {
+    /// Parse a hit count condition from a string
+    /// Format: "= N", "> N", "% N"
+    pub fn from_string(s: &str) -> Option<Self> {
+        let s = s.trim();
+        if s.starts_with('=') {
+            let count_str = s[1..].trim();
+            count_str.parse::<u32>().ok().map(HitCountCondition::Equals)
+        } else if s.starts_with('>') {
+            let count_str = s[1..].trim();
+            count_str.parse::<u32>().ok().map(HitCountCondition::GreaterThan)
+        } else if s.starts_with('%') {
+            let count_str = s[1..].trim();
+            count_str.parse::<u32>().ok().map(HitCountCondition::Multiple)
+        } else {
+            // Default to equals if just a number is provided
+            s.parse::<u32>().ok().map(HitCountCondition::Equals)
+        }
+    }
+    
+    /// Check if the hit count meets the condition
+    pub fn is_met(&self, hit_count: u32) -> bool {
+        match self {
+            HitCountCondition::Equals(target) => hit_count == *target,
+            HitCountCondition::GreaterThan(target) => hit_count > *target,
+            HitCountCondition::Multiple(target) if *target > 0 => hit_count % *target == 0,
+            _ => false,
+        }
+    }
+}
+
 /// A breakpoint in the code
 #[derive(Debug, Clone)]
 pub struct Breakpoint {
@@ -140,12 +202,16 @@ pub struct Breakpoint {
     pub column: u32,
     /// Whether the breakpoint is enabled
     pub enabled: bool,
-    /// The condition for the breakpoint to trigger (if any)
-    pub condition: Option<String>,
+    /// The condition for the breakpoint to trigger
+    pub condition_mode: BreakpointConditionMode,
     /// The hit count of the breakpoint
     pub hit_count: u32,
     /// The id of the breakpoint
     pub id: u32,
+    /// When this breakpoint was created
+    pub created_at: std::time::Instant,
+    /// When this breakpoint was last hit
+    pub last_hit: Option<std::time::Instant>,
 }
 
 impl Breakpoint {
@@ -156,256 +222,99 @@ impl Breakpoint {
             line,
             column,
             enabled: true,
-            condition: None,
+            condition_mode: BreakpointConditionMode::Always,
             hit_count: 0,
             id,
+            created_at: std::time::Instant::now(),
+            last_hit: None,
         }
     }
     
     /// Set a condition for the breakpoint
-    #[allow(dead_code)]
     pub fn with_condition(mut self, condition: &str) -> Self {
-        self.condition = Some(condition.to_string());
+        self.condition_mode = BreakpointConditionMode::ConditionalExpression(condition.to_string());
+        self
+    }
+    
+    /// Set a hit count condition for the breakpoint
+    pub fn with_hit_count_condition(mut self, condition: HitCountCondition) -> Self {
+        self.condition_mode = BreakpointConditionMode::HitCount(condition);
+        self
+    }
+    
+    /// Set both a condition and hit count for the breakpoint
+    pub fn with_combined_condition(mut self, expression: &str, hit_count: HitCountCondition) -> Self {
+        self.condition_mode = BreakpointConditionMode::Combined {
+            expression: expression.to_string(),
+            hit_count,
+        };
         self
     }
     
     /// Register a hit of the breakpoint
-    #[allow(dead_code)]
     pub fn register_hit(&mut self) {
         self.hit_count += 1;
+        self.last_hit = Some(std::time::Instant::now());
     }
     
     /// Check if the breakpoint should trigger based on its condition
-    #[allow(dead_code)]
     pub fn should_trigger(&self, variables: &VariableInspector) -> bool {
         if !self.enabled {
             return false;
         }
         
-        // If there's no condition, always trigger
-        if self.condition.is_none() {
-            return true;
-        }
-        
-        // Evaluate the condition based on the variables
-        if let Some(condition) = &self.condition {
-            // Simple expression evaluator for conditions
-            // This is a basic implementation that supports:
-            // - Variable comparisons (==, !=, <, >, <=, >=)
-            // - Logical operators (&&, ||)
+        match &self.condition_mode {
+            BreakpointConditionMode::Always => true,
             
-            // For complex conditions, we'll split by logical operators first
-            if condition.contains("&&") {
-                let parts: Vec<&str> = condition.split("&&").collect();
-                return parts.iter().all(|part| self.evaluate_simple_condition(part.trim(), variables));
-            } else if condition.contains("||") {
-                let parts: Vec<&str> = condition.split("||").collect();
-                return parts.iter().any(|part| self.evaluate_simple_condition(part.trim(), variables));
-            } else {
-                return self.evaluate_simple_condition(condition, variables);
-            }
-        }
-        
-        // Default to true if evaluation fails
-        true
-    }
-    
-    /// Evaluate a simple condition (without logical operators)
-    #[allow(dead_code)]
-    fn evaluate_simple_condition(&self, condition: &str, variables: &VariableInspector) -> bool {
-        // Check for different comparison operators
-        if condition.contains("==") {
-            let parts: Vec<&str> = condition.split("==").collect();
-            if parts.len() == 2 {
-                return self.compare_values(parts[0].trim(), parts[1].trim(), "==", variables);
-            }
-        } else if condition.contains("!=") {
-            let parts: Vec<&str> = condition.split("!=").collect();
-            if parts.len() == 2 {
-                return self.compare_values(parts[0].trim(), parts[1].trim(), "!=", variables);
-            }
-        } else if condition.contains("<=") {
-            let parts: Vec<&str> = condition.split("<=").collect();
-            if parts.len() == 2 {
-                return self.compare_values(parts[0].trim(), parts[1].trim(), "<=", variables);
-            }
-        } else if condition.contains(">=") {
-            let parts: Vec<&str> = condition.split(">=").collect();
-            if parts.len() == 2 {
-                return self.compare_values(parts[0].trim(), parts[1].trim(), ">=", variables);
-            }
-        } else if condition.contains("<") {
-            let parts: Vec<&str> = condition.split('<').collect();
-            if parts.len() == 2 {
-                return self.compare_values(parts[0].trim(), parts[1].trim(), "<", variables);
-            }
-        } else if condition.contains(">") {
-            let parts: Vec<&str> = condition.split('>').collect();
-            if parts.len() == 2 {
-                return self.compare_values(parts[0].trim(), parts[1].trim(), ">", variables);
-            }
-        }
-        
-        // If the condition is just a variable name, check if it's truthy
-        if let Some(var) = variables.get_variable(condition) {
-            return self.is_truthy(&var.value);
-        }
-        
-        false
-    }
-    
-    /// Compare two values based on the given operator
-    #[allow(dead_code)]
-    fn compare_values(&self, left: &str, right: &str, op: &str, variables: &VariableInspector) -> bool {
-        // Get the left value (either a variable or a literal)
-        let left_value = if let Some(var) = variables.get_variable(left) {
-            Some(var.value.clone())
-        } else {
-            self.parse_literal(left)
-        };
-        
-        // Get the right value (either a variable or a literal)
-        let right_value = if let Some(var) = variables.get_variable(right) {
-            Some(var.value.clone())
-        } else {
-            self.parse_literal(right)
-        };
-        
-        // Compare the values based on the operator
-        match (left_value, right_value) {
-            (Some(left_val), Some(right_val)) => {
-                self.compare_variable_values(&left_val, &right_val, op)
-            }
-            _ => false,
-        }
-    }
-    
-    /// Parse a literal value
-    #[allow(dead_code)]
-    fn parse_literal(&self, literal: &str) -> Option<VariableValue> {
-        // Try to parse as integer
-        if let Ok(i) = literal.parse::<i64>() {
-            return Some(VariableValue::Integer(i));
-        }
-        
-        // Try to parse as float
-        if let Ok(f) = literal.parse::<f64>() {
-            return Some(VariableValue::Float(f));
-        }
-        
-        // Check for boolean literals
-        if literal == "true" {
-            return Some(VariableValue::Boolean(true));
-        } else if literal == "false" {
-            return Some(VariableValue::Boolean(false));
-        }
-        
-        // Check for string literals
-        if literal.starts_with('"') && literal.ends_with('"') && literal.len() >= 2 {
-            return Some(VariableValue::String(literal[1..literal.len()-1].to_string()));
-        }
-        
-        // Check for char literals
-        if literal.starts_with('\'') && literal.ends_with('\'') && literal.len() == 3 {
-            return Some(VariableValue::Char(literal.chars().nth(1).unwrap()));
-        }
-        
-        None
-    }
-    
-    /// Compare two variable values based on the given operator
-    #[allow(dead_code)]
-    fn compare_variable_values(&self, left: &VariableValue, right: &VariableValue, op: &str) -> bool {
-        match (left, right) {
-            (VariableValue::Integer(left_int), VariableValue::Integer(right_int)) => {
-                match op {
-                    "==" => left_int == right_int,
-                    "!=" => left_int != right_int,
-                    "<" => left_int < right_int,
-                    ">" => left_int > right_int,
-                    "<=" => left_int <= right_int,
-                    ">=" => left_int >= right_int,
-                    _ => false,
-                }
-            }
-            (VariableValue::Float(left_float), VariableValue::Float(right_float)) => {
-                match op {
-                    "==" => (left_float - right_float).abs() < f64::EPSILON,
-                    "!=" => (left_float - right_float).abs() >= f64::EPSILON,
-                    "<" => left_float < right_float,
-                    ">" => left_float > right_float,
-                    "<=" => left_float <= right_float,
-                    ">=" => left_float >= right_float,
-                    _ => false,
-                }
-            }
-            (VariableValue::Boolean(left_bool), VariableValue::Boolean(right_bool)) => {
-                match op {
-                    "==" => left_bool == right_bool,
-                    "!=" => left_bool != right_bool,
-                    _ => false,
-                }
-            }
-            (VariableValue::String(left_str), VariableValue::String(right_str)) => {
-                match op {
-                    "==" => left_str == right_str,
-                    "!=" => left_str != right_str,
-                    "<" => left_str < right_str,
-                    ">" => left_str > right_str,
-                    "<=" => left_str <= right_str,
-                    ">=" => left_str >= right_str,
-                    _ => false,
-                }
-            }
-            (VariableValue::Char(left_char), VariableValue::Char(right_char)) => {
-                match op {
-                    "==" => left_char == right_char,
-                    "!=" => left_char != right_char,
-                    "<" => left_char < right_char,
-                    ">" => left_char > right_char,
-                    "<=" => left_char <= right_char,
-                    ">=" => left_char >= right_char,
-                    _ => false,
-                }
-            }
-            // For other types, only equality/inequality makes sense
-            _ => {
-                match op {
-                    "==" => format!("{:?}", left) == format!("{:?}", right),
-                    "!=" => format!("{:?}", left) != format!("{:?}", right),
-                    _ => false,
-                }
-            }
-        }
-    }
-    
-    /// Check if a variable value is "truthy"
-    #[allow(dead_code)]
-    fn is_truthy(&self, value: &VariableValue) -> bool {
-        match value {
-            VariableValue::Boolean(b) => *b,
-            VariableValue::Integer(i) => *i != 0,
-            VariableValue::Float(f) => *f != 0.0 && !f.is_nan(),
-            VariableValue::String(s) => !s.is_empty(),
-            VariableValue::Char(_) => true,
-            VariableValue::Array(arr) => !arr.is_empty(),
-            VariableValue::Struct(fields) => !fields.is_empty(),
-            VariableValue::Option(opt) => opt.is_some(),
-            VariableValue::Reference(_) => true,
-            VariableValue::Null => false,
-            VariableValue::Complex { children, fields, .. } => {
-                !fields.is_empty() || children.as_ref().is_some_and(|c| !c.is_empty())
+            BreakpointConditionMode::ConditionalExpression(expr) => {
+                self.evaluate_condition(expr, variables)
             },
-            VariableValue::Vec { elements, .. } => !elements.is_empty(),
-            VariableValue::HashMap { entries, .. } => !entries.is_empty(),
+            
+            BreakpointConditionMode::HitCount(condition) => {
+                condition.is_met(self.hit_count)
+            },
+            
+            BreakpointConditionMode::Combined { expression, hit_count } => {
+                hit_count.is_met(self.hit_count) && self.evaluate_condition(expression, variables)
+            },
         }
     }
-
-    /// Evaluate a member access expression for the breakpoint
-    /// This allows condition expressions to access struct members like "person.name"
-    #[allow(dead_code)]
-    fn evaluate_member_access(&self, base_var: &Variable, members: &[&str], _variables: &VariableInspector) -> Option<String> {
-        evaluate_member_access_helper(base_var, members)
+    
+    /// Evaluate a condition expression
+    fn evaluate_condition(&self, condition: &str, variables: &VariableInspector) -> bool {
+        // Create a temporary watch expression to evaluate the condition
+        let mut temp_watch = WatchExpression::new(condition, 0);
+        let result = temp_watch.evaluate(variables);
+        
+        // Try to convert the result to a boolean
+        match result.to_lowercase().as_str() {
+            "true" => true,
+            "false" => false,
+            // If the result is a number, treat 0 as false and non-zero as true
+            _ => {
+                if let Ok(num) = result.parse::<f64>() {
+                    num != 0.0
+                } else {
+                    // If we can't parse as a boolean or number, default to false
+                    false
+                }
+            }
+        }
+    }
+    
+    /// Check if this breakpoint is at a specific location
+    pub fn is_at_location(&self, file: &str, line: u32) -> bool {
+        self.file == file && self.line == line
+    }
+    
+    /// Get time since creation
+    pub fn age(&self) -> std::time::Duration {
+        self.created_at.elapsed()
+    }
+    
+    /// Get time since last hit
+    pub fn time_since_last_hit(&self) -> Option<std::time::Duration> {
+        self.last_hit.map(|time| time.elapsed())
     }
 }
 
@@ -420,6 +329,12 @@ pub struct WatchExpression {
     pub enabled: bool,
     /// The id of the watch
     pub id: u32,
+    /// Whether the value has changed since last evaluation
+    pub has_changed: bool,
+    /// Time of the last change
+    pub last_change: Option<std::time::Instant>,
+    /// Number of times the watch value has changed
+    pub change_count: u32,
 }
 
 impl WatchExpression {
@@ -430,167 +345,225 @@ impl WatchExpression {
             last_value: None,
             enabled: true,
             id,
+            has_changed: false,
+            last_change: None,
+            change_count: 0,
         }
     }
     
-    /// Update the value of the watch expression
-    #[allow(dead_code)]
+    /// Update the last value
     pub fn update_value(&mut self, value: &str) {
+        let has_changed = match &self.last_value {
+            Some(last) => last != value,
+            None => true,
+        };
+        
         self.last_value = Some(value.to_string());
+        
+        if has_changed {
+            self.has_changed = true;
+            self.last_change = Some(std::time::Instant::now());
+            self.change_count += 1;
+        }
     }
     
-    /// Evaluate the expression and return the result as a string
+    /// Evaluate the expression against the current variable state
     pub fn evaluate(&mut self, variables: &VariableInspector) -> String {
         if !self.enabled {
-            return "[Disabled]".to_string();
+            return String::from("[Watch disabled]");
         }
         
-        // Simple expression evaluator
-        let result = self.evaluate_expression(&self.expression, variables);
-        let value = result.unwrap_or("[Evaluation failed]".to_string());
+        // Try to evaluate the expression
+        let result = match self.evaluate_expression(&self.expression, variables) {
+            Some(value) => value,
+            None => String::from("[Evaluation failed]"),
+        };
         
-        // Update the last value
-        self.last_value = Some(value.clone());
+        // Update the last value and check for changes
+        self.update_value(&result);
         
-        value
+        result
     }
     
-    /// Evaluate an expression and return the result as a string
+    /// Evaluate a complex expression
     fn evaluate_expression(&self, expression: &str, variables: &VariableInspector) -> Option<String> {
-        // Check if this is a simple variable reference
+        // First, check if the expression is a simple variable name
         if let Some(var) = variables.get_variable(expression) {
-            return Some(format!("{}", var.value));
+            return Some(var.value.to_string());
         }
         
-        // Check for member access (e.g. "person.name")
+        // Check for member access (e.g., person.name)
         if expression.contains('.') {
             let parts: Vec<&str> = expression.split('.').collect();
             if parts.len() >= 2 {
-                let base_var = variables.get_variable(parts[0])?;
-                return self.evaluate_member_access(base_var, &parts[1..], variables);
+                let base_var_name = parts[0];
+                let members = &parts[1..];
+                
+                if let Some(base_var) = variables.get_variable(base_var_name) {
+                    return evaluate_member_access_helper(base_var, members);
+                }
             }
         }
         
-        // Check for array access (e.g. "array[0]")
-        if expression.contains('[') && expression.contains(']') {
-            let start_bracket = expression.find('[')?;
-            let end_bracket = expression.find(']')?;
-            
-            if start_bracket < end_bracket {
-                let var_name = &expression[0..start_bracket];
-                let index_expr = &expression[start_bracket+1..end_bracket];
+        // Check for array/vector access (e.g., arr[0])
+        if let Some(bracket_pos) = expression.find('[') {
+            if expression.ends_with(']') {
+                let var_name = &expression[..bracket_pos];
+                let index_str = &expression[bracket_pos + 1..expression.len() - 1];
                 
-                // Try to parse index as an integer
-                if let Ok(index) = index_expr.parse::<usize>() {
-                    if let Some(var) = variables.get_variable(var_name) {
+                if let Some(var) = variables.get_variable(var_name) {
+                    if let Ok(index) = index_str.parse::<usize>() {
                         return self.evaluate_array_access(var, index);
                     }
                 }
             }
         }
         
-        // For simple expressions like "x + 1", we'll parse and evaluate
-        if let Some(result) = self.evaluate_arithmetic_expression(expression, variables) {
-            return Some(result);
+        // Try to evaluate arithmetic expressions using basic operators
+        if expression.contains('+') || expression.contains('-') || 
+           expression.contains('*') || expression.contains('/') {
+            return self.evaluate_arithmetic_expression(expression, variables);
         }
         
-        None
+        // Try more complex expressions (function calls, complex conditionals)
+        self.evaluate_complex_expression(expression, variables)
     }
     
-    /// Evaluate member access expressions like "person.name"
-    fn evaluate_member_access(&self, base_var: &Variable, members: &[&str], _variables: &VariableInspector) -> Option<String> {
-        evaluate_member_access_helper(base_var, members)
-    }
-    
-    /// Evaluate array access expressions like "array[0]"
+    /// Evaluate array access expressions
     fn evaluate_array_access(&self, var: &Variable, index: usize) -> Option<String> {
         match &var.value {
-            VariableValue::Array(array) => {
-                if index < array.len() {
-                    Some(format!("{}", array[index]))
-                } else {
-                    Some(format!("[Index {} out of bounds (len: {})]", index, array.len()))
+            VariableValue::Array(elements) => {
+                if index < elements.len() {
+                    return Some(elements[index].to_string());
                 }
-            }
-            // For other types, we don't support array access
-            _ => None,
+            },
+            VariableValue::Vec { elements, .. } => {
+                if index < elements.len() {
+                    return Some(elements[index].to_string());
+                }
+            },
+            _ => {}
         }
+        
+        None
     }
     
-    /// Evaluate arithmetic expressions like "x + 1"
+    /// Evaluate arithmetic expressions
     fn evaluate_arithmetic_expression(&self, expression: &str, variables: &VariableInspector) -> Option<String> {
-        // Look for common operators: +, -, *, /, %
-        for op in &["+", "-", "*", "/", "%"] {
-            if expression.contains(op) {
-                let parts: Vec<&str> = expression.split(op).collect();
-                if parts.len() == 2 {
-                    let left = parts[0].trim();
-                    let right = parts[1].trim();
-                    
-                    // Get left value
-                    let left_value = if let Some(var) = variables.get_variable(left) {
-                        self.get_numeric_value(&var.value)
-                    } else if let Ok(val) = left.parse::<f64>() {
-                        Some(val)
-                    } else {
-                        None
-                    };
-                    
-                    // Get right value
-                    let right_value = if let Some(var) = variables.get_variable(right) {
-                        self.get_numeric_value(&var.value)
-                    } else if let Ok(val) = right.parse::<f64>() {
-                        Some(val)
-                    } else {
-                        None
-                    };
-                    
-                    // Perform the operation
-                    if let (Some(left_val), Some(right_val)) = (left_value, right_value) {
-                        let result = match *op {
-                            "+" => left_val + right_val,
-                            "-" => left_val - right_val,
-                            "*" => left_val * right_val,
-                            "/" => {
-                                if right_val != 0.0 {
-                                    left_val / right_val
-                                } else {
-                                    return Some("[Division by zero]".to_string());
-                                }
-                            }
-                            "%" => {
-                                if right_val != 0.0 {
-                                    left_val % right_val
-                                } else {
-                                    return Some("[Modulo by zero]".to_string());
-                                }
-                            }
-                            _ => return None, // Shouldn't happen
-                        };
-                        
-                        // Format based on whether the result is a whole number
-                        if result == (result as i64) as f64 {
-                            return Some(format!("{}", result as i64));
-                        } else {
-                            return Some(format!("{}", result));
+        // Very simple arithmetic evaluation for basic operations
+        // In a real implementation, this would use a proper expression parser
+        
+        // Find the operator
+        let op_pos = expression.find(|c| c == '+' || c == '-' || c == '*' || c == '/');
+        if let Some(pos) = op_pos {
+            let left_expr = expression[..pos].trim();
+            let right_expr = expression[pos + 1..].trim();
+            let operator = expression.chars().nth(pos).unwrap();
+            
+            // Evaluate left and right operands recursively
+            let left_result = self.evaluate_expression(left_expr, variables)
+                .and_then(|val| val.parse::<f64>().ok());
+            
+            let right_result = self.evaluate_expression(right_expr, variables)
+                .and_then(|val| val.parse::<f64>().ok());
+            
+            // Perform the operation
+            if let (Some(left), Some(right)) = (left_result, right_result) {
+                let result = match operator {
+                    '+' => left + right,
+                    '-' => left - right,
+                    '*' => left * right,
+                    '/' => {
+                        if right == 0.0 {
+                            return Some(String::from("[Division by zero]"));
                         }
-                    }
-                }
+                        left / right
+                    },
+                    _ => return None,
+                };
+                
+                // Convert result to string
+                return Some(result.to_string());
             }
         }
         
         None
     }
     
-    /// Get numeric value from a variable
-    fn get_numeric_value(&self, value: &VariableValue) -> Option<f64> {
-        match value {
-            VariableValue::Integer(i) => Some(*i as f64),
-            VariableValue::Float(f) => Some(*f),
-            VariableValue::Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
-            VariableValue::Char(c) => Some(*c as u32 as f64),
+    /// Evaluate more complex expressions like function calls or conditionals
+    fn evaluate_complex_expression(&self, expression: &str, variables: &VariableInspector) -> Option<String> {
+        // Check for conditional expressions (e.g., x > y)
+        for &op in &["==", "!=", ">=", "<=", ">", "<"] {
+            if expression.contains(op) {
+                return self.evaluate_conditional(expression, op, variables);
+            }
+        }
+        
+        // For now, we don't support function calls or more complex expressions
+        None
+    }
+    
+    /// Evaluate conditional expressions
+    fn evaluate_conditional(&self, expression: &str, operator: &str, variables: &VariableInspector) -> Option<String> {
+        let parts: Vec<&str> = expression.split(operator).collect();
+        if parts.len() != 2 {
+            return None;
+        }
+        
+        let left = parts[0].trim();
+        let right = parts[1].trim();
+        
+        // Evaluate both sides
+        let left_value = self.evaluate_expression(left, variables);
+        let right_value = self.evaluate_expression(right, variables);
+        
+        match (left_value, right_value) {
+            (Some(left_str), Some(right_str)) => {
+                // Try numeric comparison first
+                if let (Ok(left_num), Ok(right_num)) = (left_str.parse::<f64>(), right_str.parse::<f64>()) {
+                    let result = match operator {
+                        "==" => left_num == right_num,
+                        "!=" => left_num != right_num,
+                        ">=" => left_num >= right_num,
+                        "<=" => left_num <= right_num,
+                        ">" => left_num > right_num,
+                        "<" => left_num < right_num,
+                        _ => return None,
+                    };
+                    return Some(result.to_string());
+                }
+                
+                // Fallback to string comparison
+                let result = match operator {
+                    "==" => left_str == right_str,
+                    "!=" => left_str != right_str,
+                    _ => return None, // String doesn't support other comparisons
+                };
+                
+                Some(result.to_string())
+            },
             _ => None,
         }
+    }
+    
+    /// Reset the change flag after it's been seen by the UI
+    pub fn acknowledge_change(&mut self) {
+        self.has_changed = false;
+    }
+    
+    /// Check if the expression result has changed since last evaluation
+    pub fn has_changed(&self) -> bool {
+        self.has_changed
+    }
+    
+    /// Get the time since last change
+    pub fn time_since_change(&self) -> Option<std::time::Duration> {
+        self.last_change.map(|time| time.elapsed())
+    }
+    
+    /// Toggle the enabled state
+    pub fn toggle(&mut self, enabled: bool) {
+        self.enabled = enabled;
     }
 }
 
@@ -604,6 +577,8 @@ pub struct DebuggerRuntime {
     pub variable_inspector: VariableInspector,
     /// Flow controller for managing execution
     pub flow_controller: FlowController,
+    /// Type visualizer for complex types
+    pub type_visualizer: TypeVisualizer,
     /// The next breakpoint id to assign
     next_breakpoint_id: u32,
     /// The next watch id to assign
@@ -611,13 +586,14 @@ pub struct DebuggerRuntime {
 }
 
 impl DebuggerRuntime {
-    /// Create a new DebuggerRuntime
+    /// Create a new debugger runtime
     pub fn new() -> Self {
         Self {
             breakpoints: Vec::new(),
             watches: Vec::new(),
             variable_inspector: VariableInspector::new(),
             flow_controller: FlowController::new(),
+            type_visualizer: TypeVisualizer::default(),
             next_breakpoint_id: 1,
             next_watch_id: 1,
         }
@@ -647,42 +623,116 @@ impl DebuggerRuntime {
     }
     
     /// Add a conditional breakpoint
-    #[allow(dead_code)]
     pub fn add_conditional_breakpoint(&mut self, file: &str, line: u32, column: u32, condition: &str) -> u32 {
         let id = self.next_breakpoint_id;
         self.next_breakpoint_id += 1;
         
-        let breakpoint = Breakpoint::new(file, line, column, id).with_condition(condition);
-        println!("Added conditional breakpoint #{} at {}:{}:{} when {}", 
-                id, file, line, column, condition);
+        // Create a new breakpoint with the condition
+        let breakpoint = Breakpoint::new(file, line, column, id)
+            .with_condition(condition);
+        
         self.breakpoints.push(breakpoint);
         id
     }
     
-    /// Remove a breakpoint by id
-    pub fn remove_breakpoint(&mut self, id: u32) -> bool {
-        let len_before = self.breakpoints.len();
-        self.breakpoints.retain(|b| b.id != id);
-        let removed = len_before > self.breakpoints.len();
-        if removed {
-            println!("Removed breakpoint #{}", id);
-        } else {
-            println!("Breakpoint #{} not found", id);
-        }
-        removed
+    /// Add a hit count breakpoint
+    pub fn add_hit_count_breakpoint(&mut self, file: &str, line: u32, column: u32, hit_count_expr: &str) -> DbugResult<u32> {
+        let id = self.next_breakpoint_id;
+        self.next_breakpoint_id += 1;
+        
+        // Parse the hit count expression
+        let hit_count_condition = HitCountCondition::from_string(hit_count_expr)
+            .ok_or_else(|| DbugError::CliError(format!("Invalid hit count expression: {}", hit_count_expr)))?;
+        
+        // Create a new breakpoint with the hit count condition
+        let breakpoint = Breakpoint::new(file, line, column, id)
+            .with_hit_count_condition(hit_count_condition);
+        
+        self.breakpoints.push(breakpoint);
+        Ok(id)
     }
     
-    /// Enable or disable a breakpoint
+    /// Add a combined condition and hit count breakpoint
+    pub fn add_combined_breakpoint(&mut self, file: &str, line: u32, column: u32, condition: &str, hit_count_expr: &str) -> DbugResult<u32> {
+        let id = self.next_breakpoint_id;
+        self.next_breakpoint_id += 1;
+        
+        // Parse the hit count expression
+        let hit_count_condition = HitCountCondition::from_string(hit_count_expr)
+            .ok_or_else(|| DbugError::CliError(format!("Invalid hit count expression: {}", hit_count_expr)))?;
+        
+        // Create a new breakpoint with both conditions
+        let breakpoint = Breakpoint::new(file, line, column, id)
+            .with_combined_condition(condition, hit_count_condition);
+        
+        self.breakpoints.push(breakpoint);
+        Ok(id)
+    }
+    
+    /// Remove a breakpoint by id
+    pub fn remove_breakpoint(&mut self, id: u32) -> bool {
+        let pos = self.breakpoints.iter().position(|b| b.id == id);
+        if let Some(pos) = pos {
+            self.breakpoints.remove(pos);
+            true
+        } else {
+            false
+        }
+    }
+    
+    /// Toggle a breakpoint's enabled state
     pub fn toggle_breakpoint(&mut self, id: u32, enabled: bool) -> bool {
-        for breakpoint in &mut self.breakpoints {
-            if breakpoint.id == id {
-                breakpoint.enabled = enabled;
-                println!("{} breakpoint #{}", if enabled { "Enabled" } else { "Disabled" }, id);
+        if let Some(breakpoint) = self.breakpoints.iter_mut().find(|b| b.id == id) {
+            breakpoint.enabled = enabled;
+            true
+        } else {
+            false
+        }
+    }
+    
+    /// Find a breakpoint by file and line
+    pub fn find_breakpoint(&self, file: &str, line: u32) -> Option<&Breakpoint> {
+        self.breakpoints.iter().find(|b| b.is_at_location(file, line))
+    }
+    
+    /// Find a breakpoint by id
+    pub fn find_breakpoint_by_id(&self, id: u32) -> Option<&Breakpoint> {
+        self.breakpoints.iter().find(|b| b.id == id)
+    }
+    
+    /// Check if execution should break at a given location
+    pub fn should_break_at(&mut self, file: &str, line: u32, _column: u32) -> bool {
+        // Find any breakpoints at this location
+        let matching_breakpoints: Vec<_> = self.breakpoints.iter_mut()
+            .filter(|b| b.is_at_location(file, line))
+            .collect();
+        
+        for breakpoint in matching_breakpoints {
+            // Register a hit regardless of whether we actually break
+            breakpoint.register_hit();
+            
+            // Check if we should trigger based on conditions
+            if breakpoint.should_trigger(&self.variable_inspector) {
                 return true;
             }
         }
-        println!("Breakpoint #{} not found", id);
+        
         false
+    }
+    
+    /// Remove all breakpoints
+    pub fn clear_breakpoints(&mut self) {
+        self.breakpoints.clear();
+    }
+    
+    /// Remove all disabled breakpoints
+    pub fn clear_disabled_breakpoints(&mut self) {
+        self.breakpoints.retain(|b| b.enabled);
+    }
+    
+    /// Get all breakpoints
+    pub fn list_breakpoints(&self) -> &[Breakpoint] {
+        &self.breakpoints
     }
     
     /// Add a watch expression
@@ -707,34 +757,6 @@ impl DebuggerRuntime {
             println!("Watch #{} not found", id);
         }
         removed
-    }
-    
-    /// Check if execution should break at the current point
-    #[allow(dead_code)]
-    pub fn should_break_at(&mut self, file: &str, line: u32, _column: u32) -> bool {
-        for breakpoint in &mut self.breakpoints {
-            if breakpoint.file == file && breakpoint.line == line && breakpoint.enabled && breakpoint.should_trigger(&self.variable_inspector) {
-                breakpoint.register_hit();
-                return true;
-            }
-        }
-        false
-    }
-    
-    /// Get the breakpoint at a specific location, if any
-    pub fn get_breakpoint_at(&self, file: &str, line: u32) -> Option<&Breakpoint> {
-        self.breakpoints.iter().find(|b| b.file == file && b.line == line)
-    }
-    
-    /// Update the watch expressions
-    pub fn update_watches(&mut self) {
-        for watch in &mut self.watches {
-            if watch.enabled {
-                // Evaluate the expression and update the value
-                let value = watch.evaluate(&self.variable_inspector);
-                println!("Watch #{}: {} = {}", watch.id, watch.expression, value);
-            }
-        }
     }
     
     /// Update the execution point
@@ -779,11 +801,6 @@ impl DebuggerRuntime {
         self.flow_controller.get_current_point()
     }
     
-    /// List all breakpoints
-    pub fn list_breakpoints(&self) -> &[Breakpoint] {
-        &self.breakpoints
-    }
-    
     /// List all watch expressions
     pub fn list_watches(&self) -> &[WatchExpression] {
         &self.watches
@@ -794,10 +811,45 @@ impl DebuggerRuntime {
         self.variable_inspector.get_all_variables()
     }
     
-    /// Visualize a variable in detail, including complex data structures
-    #[allow(dead_code)]
+    /// Visualize a variable with advanced type handling
     pub fn visualize_variable(&self, name: &str) -> Option<String> {
-        self.variable_inspector.visualize_variable(name)
+        // Get the variable from the inspector
+        let variable = self.variable_inspector.get_variable(name)?;
+        
+        // Try to use a custom visualizer if available
+        if self.type_visualizer.has_visualizer(&variable.type_name) {
+            self.type_visualizer.visualize(variable)
+        } else {
+            // Fall back to default visualization
+            Some(self.type_visualizer.create_composite_visualization(
+                &variable.type_name, 
+                variable,
+                0
+            ))
+        }
+    }
+    
+    /// Register a custom type visualizer
+    pub fn register_type_visualizer<F>(&mut self, type_name: &str, visualizer: F)
+    where
+        F: Fn(&Variable) -> Option<String> + Send + Sync + 'static,
+    {
+        self.type_visualizer.register_visualizer(type_name, visualizer);
+    }
+    
+    /// Get all changed variables since last check
+    pub fn get_changed_variables(&mut self) -> Vec<&Variable> {
+        self.variable_inspector.get_changed_variables()
+    }
+    
+    /// Reset change tracking
+    pub fn reset_change_tracking(&mut self) {
+        self.variable_inspector.reset_change_status();
+        
+        // Reset change flags in watches
+        for watch in &mut self.watches {
+            watch.acknowledge_change();
+        }
     }
 }
 

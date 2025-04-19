@@ -1,11 +1,15 @@
 // Code instrumentation module for the dbug debugger
 
+pub mod source_mapping;
+
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use syn::{File, Item, Stmt, Attribute, Macro};
 use syn::visit::{self, Visit};
 use syn::parse_file;
 use quote::ToTokens;
+use crate::errors::{DbugResult, DbugError};
+use crate::source::SourceFile;
 
 /// A debug point in the code
 pub struct DebugPoint {
@@ -159,6 +163,8 @@ impl<'ast> Visit<'ast> for DebugPointVisitor<'_> {
 pub struct Instrumenter {
     /// The base directory for resolving relative paths
     pub base_dir: String,
+    /// Track whether source mapping is enabled
+    pub mapping_enabled: bool,
 }
 
 impl Instrumenter {
@@ -166,7 +172,13 @@ impl Instrumenter {
     pub fn new(base_dir: &str) -> Self {
         Self {
             base_dir: base_dir.to_string(),
+            mapping_enabled: true,
         }
+    }
+    
+    /// Enable or disable source mapping
+    pub fn set_mapping_enabled(&mut self, enabled: bool) {
+        self.mapping_enabled = enabled;
     }
     
     /// Find all debug points in a file
@@ -241,33 +253,94 @@ impl Instrumenter {
     
     /// Instrument a file with debug points
     pub fn instrument_file(&self, file_path: &str, debug_points: &[DebugPoint]) -> Result<(), String> {
-        let path = Path::new(&self.base_dir).join(file_path);
+        let original_path = Path::new(&self.base_dir).join(file_path);
         
-        match fs::read_to_string(&path) {
-            Ok(_content) => {
-                println!("Instrumenting file: {}", path.display());
+        match fs::read_to_string(&original_path) {
+            Ok(content) => {
+                println!("Instrumenting file: {}", original_path.display());
                 println!("Found {} debug points", debug_points.len());
                 
-                for point in debug_points {
-                    match &point.point_type {
-                        DebugPointType::Breakpoint => {
-                            println!("  Breakpoint at line {}", point.line);
-                        }
-                        DebugPointType::Watchpoint(expr) => {
-                            println!("  Watchpoint at line {}: watch {}", point.line, expr);
-                        }
-                        DebugPointType::LogPoint(msg) => {
-                            println!("  Logpoint at line {}: {}", point.line, msg);
-                        }
-                    }
+                // For now, we don't actually modify the file
+                // In a full implementation, this would insert actual instrumentation code
+                
+                // If mapping is enabled, create source mappings
+                if self.mapping_enabled {
+                    self.create_source_mappings(&original_path, debug_points)
+                        .map_err(|e| format!("Failed to create source mappings: {}", e))?;
                 }
                 
-                // Future: Actually modify the file to insert instrumentation code
-                // For now, just report on the debug points
-                
                 Ok(())
-            }
+            },
             Err(e) => Err(format!("Failed to read file: {}", e)),
         }
+    }
+    
+    /// Create source mappings for a file
+    fn create_source_mappings(&self, original_path: &Path, debug_points: &[DebugPoint]) -> DbugResult<()> {
+        if !self.mapping_enabled {
+            return Ok(());
+        }
+        
+        // Create mappings for each debug point
+        for point in debug_points {
+            let line = point.line;
+            
+            // For now, we use a 1:1 mapping since we're not actually changing code
+            // In a real implementation, this would map between original and instrumented locations
+            source_mapping::add_mapping(
+                original_path,
+                line,
+                0, // column
+                original_path, // instrumented file would be different in a real implementation
+                line,
+                0, // column
+            )?;
+        }
+        
+        // Also load the source file into the cache for quick access later
+        let source_map = source_mapping::get_source_map();
+        let mut source_map = source_map.lock().map_err(|_| {
+            crate::errors::DbugError::CommunicationError("Failed to lock source map".to_string())
+        })?;
+        
+        source_map.load_source_file(original_path)?;
+        
+        Ok(())
+    }
+    
+    /// Get source context for a specific file and line
+    pub fn get_source_context(&self, file_path: &str, line: u32, context_lines: u32) -> DbugResult<source_mapping::SourceContext> {
+        let path = if Path::new(file_path).is_absolute() {
+            PathBuf::from(file_path)
+        } else {
+            Path::new(&self.base_dir).join(file_path)
+        };
+        
+        source_mapping::get_source_context(&path, line, context_lines)
+    }
+    
+    /// Find the original source location for an instrumented location
+    pub fn find_original_location(&self, file: &str, line: u32, column: u32) -> DbugResult<Option<source_mapping::SourceLocation>> {
+        source_mapping::find_original_location(file, line, column)
+    }
+
+    pub fn instrument_one_file(&self, target: &Path, output: &Path) -> DbugResult<()> {
+        let source_file = SourceFile::load(target.to_string_lossy().into_owned())?;
+        let content = source_file.content;
+        
+        // Find debug points in the file
+        let debug_points = self.find_debug_points(&target.to_string_lossy());
+        
+        // Create source mappings for the debug points
+        if self.mapping_enabled && !debug_points.is_empty() {
+            self.create_source_mappings(target, &debug_points)?;
+        }
+        
+        // For now, just write the original content to the output file
+        // In a full implementation, we would instrument the code here
+        fs::write(output, content)
+            .map_err(|e| DbugError::Io(e))?;
+        
+        Ok(())
     }
 } 
