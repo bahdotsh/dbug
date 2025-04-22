@@ -149,7 +149,6 @@ fn run_project(project_path: &str, release: bool) {
     }
     
     // Find the executable path
-    let target_dir = if release { "release" } else { "debug" };
     let project_name = match dbug::cargo::get_project_name(project_path) {
         Ok(name) => name,
         Err(e) => {
@@ -158,10 +157,8 @@ fn run_project(project_path: &str, release: bool) {
         }
     };
     
-    let executable_path = Path::new(project_path)
-        .join("target")
-        .join(target_dir)
-        .join(&project_name);
+    // Use the utility function to find the correct executable path
+    let executable_path = dbug::utils::find_executable_path(project_path, &project_name, release);
     
     // Run the executable directly with debugging enabled
     let status = match Command::new(&executable_path)
@@ -216,7 +213,6 @@ fn debug_project(project_path: &str, release: bool) {
     }
     
     // Find the executable path
-    let target_dir = if release { "release" } else { "debug" };
     let project_name = match dbug::cargo::get_project_name(project_path) {
         Ok(name) => name,
         Err(e) => {
@@ -225,10 +221,8 @@ fn debug_project(project_path: &str, release: bool) {
         }
     };
     
-    let executable_path = Path::new(project_path)
-        .join("target")
-        .join(target_dir)
-        .join(&project_name);
+    // Use the utility function to find the correct executable path
+    let executable_path = dbug::utils::find_executable_path(project_path, &project_name, release);
     
     println!("Starting debugger for: {}", executable_path.display());
     
