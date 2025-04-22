@@ -1,10 +1,10 @@
 // Flow control functionality for the runtime debugger
-use std::sync::RwLock;
-use std::sync::atomic::{AtomicU32, Ordering};
-use once_cell::sync::Lazy;
 use crate::errors::DbugResult;
 use crate::runtime::variables::VariableValue;
-use crate::runtime::{HitCountCondition, Breakpoint, BreakpointConditionMode, VariableInspector};
+use crate::runtime::Breakpoint;
+use once_cell::sync::Lazy;
+use std::sync::atomic::AtomicU32;
+use std::sync::RwLock;
 
 /// The current execution state of the debugger
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,7 +128,7 @@ impl CallStack {
     pub fn current_frame(&self) -> Option<&StackFrame> {
         self.frames.last()
     }
-    
+
     /// Get a mutable reference to the current frame
     pub fn current_frame_mut(&mut self) -> Option<&mut StackFrame> {
         self.frames.last_mut()
@@ -220,10 +220,9 @@ impl FlowController {
     /// Update the current execution point
     pub fn update_execution_point(&mut self, point: ExecutionPoint) {
         self.current_point = Some(point);
-        
+
         // If we're in a stepping mode and we've reached a new line, pause
-        if self.next_action == FlowControl::StepOver || 
-           self.next_action == FlowControl::StepInto {
+        if self.next_action == FlowControl::StepOver || self.next_action == FlowControl::StepInto {
             self.state = ExecutionState::Paused;
         }
     }
@@ -232,10 +231,10 @@ impl FlowController {
     pub fn enter_function(&mut self, function: &str, file: &str, line: u32) {
         // Create a new stack frame
         let frame = StackFrame::new(function, file, line);
-        
+
         // Push it onto the call stack
         self.call_stack.push_frame(frame);
-        
+
         // Update the current execution point
         if let Some(current_point) = &mut self.current_point {
             current_point.function = function.to_string();
@@ -244,10 +243,14 @@ impl FlowController {
             current_point.stack_depth = self.call_stack.depth() as u32;
         } else {
             self.current_point = Some(ExecutionPoint::new(
-                file, line, 0, function, self.call_stack.depth() as u32
+                file,
+                line,
+                0,
+                function,
+                self.call_stack.depth() as u32,
             ));
         }
-        
+
         // If we're stepping into, pause when entering a function
         if self.next_action == FlowControl::StepInto {
             self.state = ExecutionState::Paused;
@@ -258,7 +261,7 @@ impl FlowController {
     pub fn exit_function(&mut self) -> Option<StackFrame> {
         // Pop the top frame from the call stack
         let frame = self.call_stack.pop_frame();
-        
+
         // Update the current execution point to the previous frame
         if let Some(parent_frame) = self.call_stack.current_frame() {
             self.current_point = Some(ExecutionPoint::new(
@@ -266,19 +269,19 @@ impl FlowController {
                 parent_frame.line,
                 0,
                 &parent_frame.function,
-                self.call_stack.depth() as u32
+                self.call_stack.depth() as u32,
             ));
         }
-        
+
         // If we're stepping out, pause when exiting a function
         if self.next_action == FlowControl::StepOut {
             self.state = ExecutionState::Paused;
             self.next_action = FlowControl::Continue;
         }
-        
+
         frame
     }
-    
+
     /// Add a variable to the current stack frame
     pub fn add_variable_to_current_frame(&mut self, variable: &str) {
         if let Some(frame) = self.call_stack.current_frame_mut() {
@@ -340,14 +343,12 @@ pub enum DebuggerState {
 }
 
 // Global state for debugger
-static DEBUGGER_STATE: Lazy<RwLock<DebuggerState>> = Lazy::new(|| {
-    RwLock::new(DebuggerState::Stopped)
-});
+static DEBUGGER_STATE: Lazy<RwLock<DebuggerState>> =
+    Lazy::new(|| RwLock::new(DebuggerState::Stopped));
 
 // Current debug position
-static CURRENT_DEBUG_POSITION: Lazy<RwLock<Option<DebugPosition>>> = Lazy::new(|| {
-    RwLock::new(None)
-});
+static CURRENT_DEBUG_POSITION: Lazy<RwLock<Option<DebugPosition>>> =
+    Lazy::new(|| RwLock::new(None));
 
 // Breakpoint manager singleton
 pub struct BreakpointManager {
@@ -363,33 +364,36 @@ impl BreakpointManager {
             next_id: AtomicU32::new(1),
         }
     }
-    
+
     /// Get a breakpoint by its location
     pub fn get_breakpoint_by_location(&self, location: &str) -> Option<&Breakpoint> {
-        self.breakpoints.iter().find(|bp| format!("{}:{}:{}", bp.file, bp.line, bp.column) == location)
+        self.breakpoints
+            .iter()
+            .find(|bp| format!("{}:{}:{}", bp.file, bp.line, bp.column) == location)
     }
-    
+
     /// Get a mutable reference to a breakpoint by its location
     pub fn get_breakpoint_by_location_mut(&mut self, location: &str) -> Option<&mut Breakpoint> {
-        self.breakpoints.iter_mut().find(|bp| format!("{}:{}:{}", bp.file, bp.line, bp.column) == location)
+        self.breakpoints
+            .iter_mut()
+            .find(|bp| format!("{}:{}:{}", bp.file, bp.line, bp.column) == location)
     }
 }
 
 // Global breakpoint manager
-static BREAKPOINT_MANAGER: Lazy<RwLock<BreakpointManager>> = Lazy::new(|| {
-    RwLock::new(BreakpointManager::new())
-});
+static BREAKPOINT_MANAGER: Lazy<RwLock<BreakpointManager>> =
+    Lazy::new(|| RwLock::new(BreakpointManager::new()));
 
 /// Process an async debug point (breakpoint in async code)
 pub fn handle_async_breakpoint(
-    file: &str, 
-    line: u32, 
+    file: &str,
+    line: u32,
     column: u32,
     task_id: u64,
-    function_name: &str
+    function_name: &str,
 ) -> DbugResult<bool> {
     let location = format!("{}:{}:{}", file, line, column);
-    
+
     // Check if there's a breakpoint at this location
     let should_break = {
         let manager = BREAKPOINT_MANAGER.read().unwrap();
@@ -402,11 +406,13 @@ pub fn handle_async_breakpoint(
                         bp.hit_count += 1;
                     }
                 }
-                
+
                 // Log the breakpoint hit
-                eprintln!("[DBUG] Async breakpoint hit: {} in {} (task_id: {})", 
-                    location, function_name, task_id);
-                
+                eprintln!(
+                    "[DBUG] Async breakpoint hit: {} in {} (task_id: {})",
+                    location, function_name, task_id
+                );
+
                 // Check if we should pause at this breakpoint (based on conditions, hit counts, etc.)
                 process_breakpoint_hit(&location, task_id)
             } else {
@@ -420,12 +426,14 @@ pub fn handle_async_breakpoint(
             false
         }
     };
-    
+
     // Update debugger state if we're pausing
     if should_break {
-        eprintln!("[DBUG] Pausing at async breakpoint: {} in {} (task_id: {})", 
-            location, function_name, task_id);
-        
+        eprintln!(
+            "[DBUG] Pausing at async breakpoint: {} in {} (task_id: {})",
+            location, function_name, task_id
+        );
+
         // Update the current debug position
         *CURRENT_DEBUG_POSITION.write().unwrap() = Some(DebugPosition {
             file: file.to_string(),
@@ -436,11 +444,11 @@ pub fn handle_async_breakpoint(
             is_async: true,
             async_task_id: Some(task_id),
         });
-        
+
         // Update the debugger state
         *DEBUGGER_STATE.write().unwrap() = DebuggerState::Paused;
     }
-    
+
     Ok(should_break)
 }
 
@@ -452,19 +460,23 @@ fn process_breakpoint_hit(location: &str, task_id: u64) -> bool {
         Some(bp) => bp.clone(),
         None => return false, // No breakpoint found
     };
-    
+
     // Check hit count conditions
     let hit_count_match = match &bp.condition_mode {
-        crate::runtime::BreakpointConditionMode::HitCount(condition) => condition.is_met(bp.hit_count),
-        crate::runtime::BreakpointConditionMode::Combined { hit_count, .. } => hit_count.is_met(bp.hit_count),
+        crate::runtime::BreakpointConditionMode::HitCount(condition) => {
+            condition.is_met(bp.hit_count)
+        }
+        crate::runtime::BreakpointConditionMode::Combined { hit_count, .. } => {
+            hit_count.is_met(bp.hit_count)
+        }
         _ => true, // No hit count condition
     };
-    
+
     // If hit count doesn't match, don't pause
     if !hit_count_match {
         return false;
     }
-    
+
     // Check condition expression if one exists
     match &bp.condition_mode {
         crate::runtime::BreakpointConditionMode::ConditionalExpression(condition) => {
@@ -475,7 +487,9 @@ fn process_breakpoint_hit(location: &str, task_id: u64) -> bool {
                     match result.as_bool() {
                         Ok(should_break) => should_break,
                         Err(_) => {
-                            eprintln!("[DBUG] Error: Breakpoint condition did not evaluate to a boolean");
+                            eprintln!(
+                                "[DBUG] Error: Breakpoint condition did not evaluate to a boolean"
+                            );
                             false
                         }
                     }
@@ -485,7 +499,7 @@ fn process_breakpoint_hit(location: &str, task_id: u64) -> bool {
                     false
                 }
             }
-        },
+        }
         crate::runtime::BreakpointConditionMode::Combined { expression, .. } => {
             // Evaluate the condition in the current context
             match evaluate_breakpoint_condition(expression, task_id) {
@@ -494,7 +508,9 @@ fn process_breakpoint_hit(location: &str, task_id: u64) -> bool {
                     match result.as_bool() {
                         Ok(should_break) => should_break,
                         Err(_) => {
-                            eprintln!("[DBUG] Error: Breakpoint condition did not evaluate to a boolean");
+                            eprintln!(
+                                "[DBUG] Error: Breakpoint condition did not evaluate to a boolean"
+                            );
                             false
                         }
                     }
@@ -504,17 +520,17 @@ fn process_breakpoint_hit(location: &str, task_id: u64) -> bool {
                     false
                 }
             }
-        },
+        }
         _ => true, // No condition, always break
     }
 }
 
 /// Evaluate a breakpoint condition in the current context
-fn evaluate_breakpoint_condition(condition: &str, task_id: u64) -> DbugResult<VariableValue> {
+fn evaluate_breakpoint_condition(_condition: &str, task_id: u64) -> DbugResult<VariableValue> {
     // This is a simplified version - in a real implementation,
     // you would evaluate the condition in the current context,
     // with access to variables, etc.
-    
+
     // For now, just create a dummy result based on the task_id
     // In a real implementation, this would use a proper expression evaluator
     Ok(VariableValue::Boolean(task_id % 2 == 0))
@@ -535,4 +551,4 @@ impl VariableValueExt for VariableValue {
             _ => Err("Cannot convert value to boolean".into()),
         }
     }
-} 
+}

@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
-use syn::{parse_macro_input, ItemFn, Stmt, parse_quote, Block, Expr};
+use syn::{parse_macro_input, parse_quote, Block, Expr, ItemFn, Stmt};
 
 /// Marks a function for debugging with dbug
 ///
@@ -23,41 +23,41 @@ use syn::{parse_macro_input, ItemFn, Stmt, parse_quote, Block, Expr};
 pub fn dbug(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Parse the input function
     let result = parse_macro_input!(item as ItemFn);
-    
+
     // Get function details
     let mut input_fn = result;
     let fn_name = &input_fn.sig.ident;
     let fn_name_str = fn_name.to_string();
-    
+
     // Add exit instrumentation using a guard pattern with Drop
     // to ensure it's called on all exit paths, including early returns and panics
     let block = &input_fn.block;
-    
+
     let new_block: Block = parse_quote! {{
         // Create a guard struct to handle function exit
         struct _DbugGuard<'a> {
             fn_name: &'a str,
         }
-        
+
         impl<'a> Drop for _DbugGuard<'a> {
             fn drop(&mut self) {
                 ::dbug::_internal::exit_function(self.fn_name);
             }
         }
-        
+
         // Create the guard - will be dropped when the function exits
         let _guard = _DbugGuard { fn_name: #fn_name_str };
-        
+
         // Notify function entry
         ::dbug::_internal::enter_function(#fn_name_str);
-        
+
         // Original function body continues here
         #block
     }};
-    
+
     // Replace the function block with our instrumented block
     input_fn.block = Box::new(new_block);
-    
+
     // Convert back to TokenStream
     let output = input_fn.to_token_stream();
     output.into()
@@ -83,7 +83,7 @@ pub fn break_here(_input: TokenStream) -> TokenStream {
             ::dbug::_internal::break_point(file!(), line!(), column!());
         }
     };
-    
+
     output.into()
 }
 
@@ -101,7 +101,7 @@ pub fn break_here(_input: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn break_at(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let result = syn::parse::<Stmt>(item.clone());
-    
+
     match result {
         Ok(item_ast) => {
             let output = quote! {
@@ -110,9 +110,9 @@ pub fn break_at(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     #item_ast
                 }
             };
-            
+
             output.into()
-        },
+        }
         Err(err) => {
             // Return the original unmodified stream if we fail to parse
             eprintln!("Error in dbug::break_at macro: {}", err);
@@ -136,30 +136,30 @@ pub fn break_at(_attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn register_var(input: TokenStream) -> TokenStream {
     let result = syn::parse::<syn::Ident>(input.clone());
-    
+
     match result {
         Ok(var_name) => {
             let var_name_str = var_name.to_string();
-            
+
             let output = quote! {
                 {
                     // Get the type of the variable using std::any::type_name
                     let type_name = std::any::type_name_of_val(&#var_name);
-                        
-                    // For simplicity, convert to string (in a real implementation, 
+
+                    // For simplicity, convert to string (in a real implementation,
                     // this would be more sophisticated)
                     let value_str = format!("{:?}", #var_name);
-                    
+
                     // Check if the variable is mutable - this is a simplified approach
                     // In a full implementation, would need more complex analysis
-                    let is_mutable = false; 
-                    
+                    let is_mutable = false;
+
                     ::dbug::_internal::register_variable(#var_name_str, type_name, &value_str, is_mutable);
                 }
             };
-            
+
             output.into()
-        },
+        }
         Err(err) => {
             // Output a compile error if we fail to parse
             let error_message = format!("Error parsing variable name in register_var!: {}", err);
@@ -192,10 +192,10 @@ pub fn register_var(input: TokenStream) -> TokenStream {
 pub fn dbug_async(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Parse the input function
     let mut input_fn = parse_macro_input!(item as ItemFn);
-    
+
     // Check if the function is async
     let is_async = input_fn.sig.asyncness.is_some();
-    
+
     if !is_async {
         // Return an error if the function is not async
         let error = syn::Error::new_spanned(
@@ -204,48 +204,48 @@ pub fn dbug_async(_attr: TokenStream, item: TokenStream) -> TokenStream {
         );
         return TokenStream::from(error.to_compile_error());
     }
-    
+
     // Get function details
     let fn_name = &input_fn.sig.ident;
     let fn_name_str = fn_name.to_string();
-    
+
     // Add exit instrumentation using a guard pattern with Drop
     // to ensure it's called on all exit paths, including early returns and panics
     let block = &input_fn.block;
-    
+
     let new_block: Block = parse_quote! {{
         // Create a guard struct to handle function exit
         struct _DbugAsyncGuard<'a> {
             fn_name: &'a str,
             task_id: u64,
         }
-        
+
         impl<'a> Drop for _DbugAsyncGuard<'a> {
             fn drop(&mut self) {
                 ::dbug::_internal::exit_async_function(self.fn_name, self.task_id);
             }
         }
-        
+
         // Generate a unique task identifier for this async execution
         let task_id = ::dbug::_internal::generate_async_task_id();
-        
+
         // Create the guard - will be dropped when the function exits
-        let _guard = _DbugAsyncGuard { 
+        let _guard = _DbugAsyncGuard {
             fn_name: #fn_name_str,
             task_id
         };
-        
+
         // Notify function entry
         ::dbug::_internal::enter_async_function(#fn_name_str, task_id);
-        
+
         // Original function body continues here
         // The async execution will be tracked by the task_id
         #block
     }};
-    
+
     // Replace the function block with our instrumented block
     input_fn.block = Box::new(new_block);
-    
+
     // Convert back to TokenStream
     let output = input_fn.to_token_stream();
     output.into()
@@ -272,7 +272,7 @@ pub fn async_break_here(_input: TokenStream) -> TokenStream {
             ::dbug::_internal::async_break_point(file!(), line!(), column!(), task_id);
         }
     };
-    
+
     output.into()
 }
 
@@ -295,7 +295,7 @@ pub fn async_break_here(_input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn async_break_when(input: TokenStream) -> TokenStream {
     let condition = parse_macro_input!(input as Expr);
-    
+
     let output = quote! {
         {
             let task_id = ::dbug::_internal::get_current_async_task_id();
@@ -304,6 +304,6 @@ pub fn async_break_when(input: TokenStream) -> TokenStream {
             }
         }
     };
-    
+
     output.into()
-} 
+}

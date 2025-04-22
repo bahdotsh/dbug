@@ -1,8 +1,7 @@
 // Utility functions for the dbug debugger
 
-use std::path::{Path, PathBuf};
 use std::fs;
-use std::process::exit;
+use std::path::{Path, PathBuf};
 
 /// Find all Rust source files in a directory
 pub fn find_rust_files(dir: &str) -> Result<Vec<PathBuf>, String> {
@@ -16,11 +15,11 @@ fn find_rust_files_recursive(dir: &Path, result: &mut Vec<PathBuf>) -> Result<()
     if !dir.is_dir() {
         return Err(format!("Not a directory: {}", dir.display()));
     }
-    
+
     for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
-        
+
         if path.is_dir() {
             find_rust_files_recursive(&path, result)?;
         } else if let Some(extension) = path.extension() {
@@ -29,7 +28,7 @@ fn find_rust_files_recursive(dir: &Path, result: &mut Vec<PathBuf>) -> Result<()
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -56,7 +55,7 @@ pub fn format_path(path: &Path, base_dir: &Path) -> String {
 /// Find the correct executable path for a project, considering workspace structure
 pub fn find_executable_path(project_path: &str, project_name: &str, release: bool) -> PathBuf {
     let target_dir = if release { "release" } else { "debug" };
-    
+
     // Convert to absolute path for consistency
     let abs_project_path = if Path::new(project_path).is_absolute() {
         PathBuf::from(project_path)
@@ -66,26 +65,35 @@ pub fn find_executable_path(project_path: &str, project_name: &str, release: boo
             .map(|p| p.join(project_path))
             .unwrap_or_else(|_| PathBuf::from(project_path))
     };
-    
+
     // List of possible locations for the executable, in order of preference:
     let possible_paths = vec![
         // 1. Workspace root's target directory (most common for workspace members)
-        abs_project_path.join("../..").join("target").join(target_dir).join(project_name),
-        
+        abs_project_path
+            .join("../..")
+            .join("target")
+            .join(target_dir)
+            .join(project_name),
         // 2. Parent directory's target directory (alternative workspace structure)
-        abs_project_path.join("..").join("target").join(target_dir).join(project_name),
-        
+        abs_project_path
+            .join("..")
+            .join("target")
+            .join(target_dir)
+            .join(project_name),
         // 3. Project's own target directory (standalone projects)
-        abs_project_path.join("target").join(target_dir).join(project_name)
+        abs_project_path
+            .join("target")
+            .join(target_dir)
+            .join(project_name),
     ];
-    
+
     // Check each path and return the first one that exists
     for path in &possible_paths {
         if path.exists() {
             return path.clone();
         }
     }
-    
+
     // If none of the paths exist yet, return the most likely one based on workspace detection
     if is_workspace_member(&abs_project_path) {
         // For workspace members, prefer the workspace root target
@@ -106,14 +114,14 @@ fn is_workspace_member(project_path: &Path) -> bool {
             if content.contains("[workspace]") {
                 return true;
             }
-            
+
             // If it has a workspace key, it's a workspace member
             if content.contains("workspace = ") {
                 return true;
             }
         }
     }
-    
+
     // Check if any parent directory contains a Cargo.toml with a workspace definition
     let parent = project_path.parent();
     if let Some(parent_path) = parent {
@@ -126,7 +134,7 @@ fn is_workspace_member(project_path: &Path) -> bool {
             }
         }
     }
-    
+
     false
 }
 
@@ -134,11 +142,11 @@ fn is_workspace_member(project_path: &Path) -> bool {
 #[allow(dead_code)]
 pub fn timestamp() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    
+
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    
+
     now.to_string()
-} 
+}

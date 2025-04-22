@@ -8,14 +8,18 @@ use tempfile::tempdir;
 fn test_version_command() {
     let mut cmd = Command::cargo_bin("dbug").unwrap();
     cmd.arg("version");
-    cmd.assert().success().stdout(predicate::str::contains("dbug v0.1.0"));
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("dbug v0.1.0"));
 }
 
 #[test]
 fn test_help_command() {
     let mut cmd = Command::cargo_bin("dbug").unwrap();
     cmd.arg("help");
-    cmd.assert().success().stdout(predicate::str::contains("USAGE:"));
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("USAGE:"));
 }
 
 #[test]
@@ -29,11 +33,11 @@ fn test_build_nonexistent_project() {
 fn test_build_example_project() {
     // This test assumes that the examples/simple_app directory exists
     let project_path = Path::new("examples").join("simple_app");
-    
+
     if !project_path.exists() {
         panic!("Example project not found: {}", project_path.display());
     }
-    
+
     let mut cmd = Command::cargo_bin("dbug").unwrap();
     cmd.args(["build", &project_path.to_string_lossy()]);
     cmd.assert().success();
@@ -47,7 +51,7 @@ fn test_debug_flow() {
     let temp_dir = tempdir().unwrap();
     let project_dir = temp_dir.path().join("test_project");
     fs::create_dir(&project_dir).unwrap();
-    
+
     // Create Cargo.toml
     fs::write(
         project_dir.join("Cargo.toml"),
@@ -60,11 +64,12 @@ edition = "2021"
 [dependencies]
 dbug = { path = "../.." }
         "#,
-    ).unwrap();
-    
+    )
+    .unwrap();
+
     // Create src directory
     fs::create_dir(project_dir.join("src")).unwrap();
-    
+
     // Create main.rs with a debug point
     fs::write(
         project_dir.join("src").join("main.rs"),
@@ -78,15 +83,19 @@ fn main() {
     println!("x = {}", x);
 }
         "#,
-    ).unwrap();
-    
+    )
+    .unwrap();
+
     // Build the project with dbug
     let mut build_cmd = Command::cargo_bin("dbug").unwrap();
     build_cmd.args(["build", &project_dir.to_string_lossy()]);
     build_cmd.assert().success();
-    
+
     // Run the project and verify it hits the breakpoint
     let mut run_cmd = Command::cargo_bin("dbug").unwrap();
     run_cmd.args(["run", &project_dir.to_string_lossy()]);
-    run_cmd.assert().success().stdout(predicate::str::contains("Breakpoint at"));
-} 
+    run_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Breakpoint at"));
+}

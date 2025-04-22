@@ -41,6 +41,9 @@ pub enum DbugError {
     #[error("CLI error: {0}")]
     CliError(String),
 
+    #[error("Terminal UI error: {0}")]
+    TuiError(String),
+
     #[error("Not a valid Rust project (no Cargo.toml found)")]
     NotARustProject,
 
@@ -59,13 +62,11 @@ pub trait ErrorExt<T> {
 
 impl<T, E: std::error::Error + 'static> ErrorExt<T> for Result<T, E> {
     fn with_context<C: AsRef<str>>(self, context: C) -> DbugResult<T> {
-        self.map_err(|e| {
-            DbugError::Unknown(format!("{}: {}", context.as_ref(), e))
-        })
+        self.map_err(|e| DbugError::Unknown(format!("{}: {}", context.as_ref(), e)))
     }
 }
 
 /// Utility function to convert any error to a DbugError with a custom message
 pub fn to_dbug_error<E: std::error::Error>(err: E, message: &str) -> DbugError {
     DbugError::Unknown(format!("{}: {}", message, err))
-} 
+}

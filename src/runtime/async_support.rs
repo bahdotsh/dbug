@@ -1,8 +1,8 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
-use crate::errors::DbugResult;
 use crate::communication;
+use crate::errors::DbugResult;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::RwLock;
 
 /// A unique identifier for async tasks
 pub type TaskId = u64;
@@ -80,7 +80,11 @@ pub fn clear_current_async_task_id() {
 }
 
 /// Register a new async task
-pub fn register_async_task(function_name: &str, task_id: TaskId, parent_id: Option<TaskId>) -> DbugResult<()> {
+pub fn register_async_task(
+    function_name: &str,
+    task_id: TaskId,
+    parent_id: Option<TaskId>,
+) -> DbugResult<()> {
     let task_info = AsyncTaskInfo {
         id: task_id,
         function_name: function_name.to_string(),
@@ -88,11 +92,11 @@ pub fn register_async_task(function_name: &str, task_id: TaskId, parent_id: Opti
         state: AsyncTaskState::Created,
         parent_id,
     };
-    
+
     // Register the task
     let mut registry = ASYNC_TASK_REGISTRY.write().unwrap();
     registry.insert(task_id, task_info);
-    
+
     // Notify the debugger
     communication::notify_async_task_created(function_name, task_id, parent_id)
 }
@@ -100,13 +104,17 @@ pub fn register_async_task(function_name: &str, task_id: TaskId, parent_id: Opti
 /// Update the state of an async task
 pub fn update_async_task_state(task_id: TaskId, state: AsyncTaskState) -> DbugResult<()> {
     let mut registry = ASYNC_TASK_REGISTRY.write().unwrap();
-    
+
     if let Some(task) = registry.get_mut(&task_id) {
         let old_state = task.state.clone();
         task.state = state.clone();
-        
+
         // Notify the debugger
-        communication::notify_async_task_state_changed(task_id, &old_state.to_string(), &state.to_string())
+        communication::notify_async_task_state_changed(
+            task_id,
+            &old_state.to_string(),
+            &state.to_string(),
+        )
     } else {
         // Task not found, might have been garbage collected
         Ok(())
@@ -133,25 +141,25 @@ pub fn get_all_async_tasks() -> Vec<AsyncTaskInfo> {
 /// Create a visualization of the async task tree
 pub fn visualize_async_task_tree() -> String {
     let registry = ASYNC_TASK_REGISTRY.read().unwrap();
-    
+
     // Group tasks by their parent
     let mut tree: HashMap<Option<TaskId>, Vec<&AsyncTaskInfo>> = HashMap::new();
-    
+
     for task in registry.values() {
         tree.entry(task.parent_id).or_default().push(task);
     }
-    
+
     // Build the visualization
     let mut result = String::new();
     result.push_str("Async Task Tree:\n");
-    
+
     // Start with root tasks (those with no parent)
     let root_tasks = tree.get(&None).cloned().unwrap_or_default();
-    
+
     for task in root_tasks {
         visualize_task(&tree, task, 0, &mut result);
     }
-    
+
     result
 }
 
@@ -164,7 +172,7 @@ fn visualize_task(
 ) {
     // Add indentation based on depth
     let indent = "  ".repeat(depth);
-    
+
     // Add this task
     result.push_str(&format!(
         "{}└─ Task {} ({}): {} [{}]\n",
@@ -174,7 +182,7 @@ fn visualize_task(
         task.state.to_string(),
         humantime::format_duration(task.created_at.elapsed())
     ));
-    
+
     // Add children
     if let Some(children) = tree.get(&Some(task.id)) {
         for child in children {
@@ -194,4 +202,4 @@ impl ToString for AsyncTaskState {
             Self::Cancelled => "Cancelled".to_string(),
         }
     }
-} 
+}
