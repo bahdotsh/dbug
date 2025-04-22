@@ -68,6 +68,31 @@ pub enum DebuggerMessage {
         /// The result
         result: String,
     },
+    /// Async debug message types
+    AsyncTaskCreated {
+        function_name: String,
+        task_id: u64,
+        parent_id: Option<u64>,
+    },
+    AsyncTaskStateChanged {
+        task_id: u64,
+        old_state: String,
+        new_state: String,
+    },
+    AsyncFunctionEntered {
+        function_name: String,
+        task_id: u64,
+    },
+    AsyncFunctionExited {
+        function_name: String,
+        task_id: u64,
+    },
+    AsyncBreakPoint {
+        file: String,
+        line: u32,
+        column: u32,
+        task_id: u64,
+    },
 }
 
 /// A response from the debugger to the instrumented code
@@ -479,6 +504,79 @@ pub fn notify_variable_changed(name: &str, type_name: &str, value: &str, is_muta
     queue_message(message)
 }
 
+/// Notify the debugger that an async task has been created
+pub fn notify_async_task_created(
+    function_name: &str,
+    task_id: u64,
+    parent_id: Option<u64>,
+) -> DbugResult<()> {
+    let message = DebuggerMessage::AsyncTaskCreated {
+        function_name: function_name.to_string(),
+        task_id,
+        parent_id,
+    };
+    
+    send_message(message)
+}
+
+/// Notify the debugger that an async task's state has changed
+pub fn notify_async_task_state_changed(
+    task_id: u64,
+    old_state: &str,
+    new_state: &str,
+) -> DbugResult<()> {
+    let message = DebuggerMessage::AsyncTaskStateChanged {
+        task_id,
+        old_state: old_state.to_string(),
+        new_state: new_state.to_string(),
+    };
+    
+    send_message(message)
+}
+
+/// Notify the debugger that an async function has been entered
+pub fn notify_async_function_entered(
+    function_name: &str,
+    task_id: u64,
+) -> DbugResult<()> {
+    let message = DebuggerMessage::AsyncFunctionEntered {
+        function_name: function_name.to_string(),
+        task_id,
+    };
+    
+    send_message(message)
+}
+
+/// Notify the debugger that an async function has been exited
+pub fn notify_async_function_exited(
+    function_name: &str,
+    task_id: u64,
+) -> DbugResult<()> {
+    let message = DebuggerMessage::AsyncFunctionExited {
+        function_name: function_name.to_string(),
+        task_id,
+    };
+    
+    send_message(message)
+}
+
+/// Process an async debug point (breakpoint in async code)
+pub fn process_async_debug_point(
+    file: &str,
+    line: u32,
+    column: u32,
+    task_id: u64,
+) -> DbugResult<()> {
+    let message = DebuggerMessage::AsyncBreakPoint {
+        file: file.to_string(),
+        line,
+        column,
+        task_id,
+    };
+    
+    send_message(message)
+}
+
 /// Initialize the communication channel for a debugging session
 pub fn init_debugging_session() -> DbugResult<()> {
     // Initialize the communication channel
@@ -516,4 +614,85 @@ pub fn check_for_messages() -> DbugResult<Option<DebuggerMessage>> {
     // In a real implementation, this would check a queue or similar
     // For now, we'll just return None to indicate no messages
     Ok(None)
+}
+
+/// Handle incoming messages from the debugger
+fn handle_message(message: DebuggerMessage) -> DbugResult<()> {
+    match message {
+        DebuggerMessage::BreakpointHit { file, line, column, function } => {
+            // Process the breakpoint hit
+            eprintln!("[DBUG] Breakpoint hit: {}:{}:{} in {}", file, line, column, function);
+            Ok(())
+        },
+        
+        DebuggerMessage::FunctionEntered { function, file, line } => {
+            // Process function entry
+            eprintln!("[DBUG] Function entered: {} at {}:{}", function, file, line);
+            Ok(())
+        },
+        
+        DebuggerMessage::FunctionExited { function } => {
+            // Process function exit
+            eprintln!("[DBUG] Function exited: {}", function);
+            Ok(())
+        },
+        
+        DebuggerMessage::VariableChanged { name, type_name, value, is_mutable } => {
+            // Process variable change
+            eprintln!("[DBUG] Variable changed: {} ({}) = {}", name, type_name, value);
+            Ok(())
+        },
+        
+        DebuggerMessage::BatchedMessages(messages) => {
+            // Process each message in the batch
+            for msg in messages {
+                handle_message(msg)?;
+            }
+            Ok(())
+        },
+        
+        DebuggerMessage::ExpressionResult { expression, result } => {
+            // Process expression result
+            eprintln!("[DBUG] Expression result: {} = {}", expression, result);
+            Ok(())
+        },
+        
+        // Handle async-related messages
+        DebuggerMessage::AsyncTaskCreated { function_name, task_id, parent_id } => {
+            // Already registered in the async_support module
+            Ok(())
+        },
+        
+        DebuggerMessage::AsyncTaskStateChanged { task_id, old_state, new_state } => {
+            // Already processed in the async_support module
+            Ok(())
+        },
+        
+        DebuggerMessage::AsyncFunctionEntered { function_name, task_id } => {
+            // Already registered in the async_support module
+            Ok(())
+        },
+        
+        DebuggerMessage::AsyncFunctionExited { function_name, task_id } => {
+            // Already processed in the async_support module
+            Ok(())
+        },
+        
+        DebuggerMessage::AsyncBreakPoint { file, line, column, task_id } => {
+            // Get a simplified function name from the file
+            let file_stem = std::path::Path::new(&file)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown");
+            
+            let function_name = format!("async_function_in_{}", file_stem);
+            
+            // Process the async breakpoint
+            crate::runtime::flow_control::handle_async_breakpoint(
+                &file, line, column, task_id, &function_name
+            )?;
+            
+            Ok(())
+        },
+    }
 } 

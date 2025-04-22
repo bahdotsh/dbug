@@ -1,4 +1,10 @@
 // Flow control functionality for the runtime debugger
+use std::sync::RwLock;
+use std::sync::atomic::{AtomicU32, Ordering};
+use once_cell::sync::Lazy;
+use crate::errors::DbugResult;
+use crate::runtime::variables::VariableValue;
+use crate::runtime::{HitCountCondition, Breakpoint, BreakpointConditionMode, VariableInspector};
 
 /// The current execution state of the debugger
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -298,5 +304,235 @@ impl FlowController {
     /// Get the call stack
     pub fn get_call_stack(&self) -> &CallStack {
         &self.call_stack
+    }
+}
+
+// Definition for DebugPosition
+#[derive(Debug, Clone)]
+pub struct DebugPosition {
+    /// The file where the breakpoint was hit
+    pub file: String,
+    /// The line where the breakpoint was hit
+    pub line: u32,
+    /// The column where the breakpoint was hit
+    pub column: u32,
+    /// The function where the breakpoint was hit
+    pub function: String,
+    /// The stack frame index
+    pub stack_frame: u32,
+    /// Whether this is an async breakpoint
+    pub is_async: bool,
+    /// The async task ID if this is an async breakpoint
+    pub async_task_id: Option<u64>,
+}
+
+// Definition for DebuggerState
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DebuggerState {
+    /// The debugger is running
+    Running,
+    /// The debugger is paused
+    Paused,
+    /// The debugger is waiting for input
+    Waiting,
+    /// The debugger has stopped
+    Stopped,
+}
+
+// Global state for debugger
+static DEBUGGER_STATE: Lazy<RwLock<DebuggerState>> = Lazy::new(|| {
+    RwLock::new(DebuggerState::Stopped)
+});
+
+// Current debug position
+static CURRENT_DEBUG_POSITION: Lazy<RwLock<Option<DebugPosition>>> = Lazy::new(|| {
+    RwLock::new(None)
+});
+
+// Breakpoint manager singleton
+pub struct BreakpointManager {
+    breakpoints: Vec<Breakpoint>,
+    next_id: AtomicU32,
+}
+
+impl BreakpointManager {
+    /// Create a new breakpoint manager
+    fn new() -> Self {
+        Self {
+            breakpoints: Vec::new(),
+            next_id: AtomicU32::new(1),
+        }
+    }
+    
+    /// Get a breakpoint by its location
+    pub fn get_breakpoint_by_location(&self, location: &str) -> Option<&Breakpoint> {
+        self.breakpoints.iter().find(|bp| format!("{}:{}:{}", bp.file, bp.line, bp.column) == location)
+    }
+    
+    /// Get a mutable reference to a breakpoint by its location
+    pub fn get_breakpoint_by_location_mut(&mut self, location: &str) -> Option<&mut Breakpoint> {
+        self.breakpoints.iter_mut().find(|bp| format!("{}:{}:{}", bp.file, bp.line, bp.column) == location)
+    }
+}
+
+// Global breakpoint manager
+static BREAKPOINT_MANAGER: Lazy<RwLock<BreakpointManager>> = Lazy::new(|| {
+    RwLock::new(BreakpointManager::new())
+});
+
+/// Process an async debug point (breakpoint in async code)
+pub fn handle_async_breakpoint(
+    file: &str, 
+    line: u32, 
+    column: u32,
+    task_id: u64,
+    function_name: &str
+) -> DbugResult<bool> {
+    let location = format!("{}:{}:{}", file, line, column);
+    
+    // Check if there's a breakpoint at this location
+    let should_break = {
+        let manager = BREAKPOINT_MANAGER.read().unwrap();
+        if let Some(bp) = manager.get_breakpoint_by_location(&location) {
+            if bp.enabled {
+                // Update hit count
+                {
+                    let mut mgr = BREAKPOINT_MANAGER.write().unwrap();
+                    if let Some(bp) = mgr.get_breakpoint_by_location_mut(&location) {
+                        bp.hit_count += 1;
+                    }
+                }
+                
+                // Log the breakpoint hit
+                eprintln!("[DBUG] Async breakpoint hit: {} in {} (task_id: {})", 
+                    location, function_name, task_id);
+                
+                // Check if we should pause at this breakpoint (based on conditions, hit counts, etc.)
+                process_breakpoint_hit(&location, task_id)
+            } else {
+                // Breakpoint is disabled
+                eprintln!("[DBUG] Async breakpoint is disabled: {}", location);
+                false
+            }
+        } else {
+            // No breakpoint at this location
+            eprintln!("[DBUG] No async breakpoint defined at {}", location);
+            false
+        }
+    };
+    
+    // Update debugger state if we're pausing
+    if should_break {
+        eprintln!("[DBUG] Pausing at async breakpoint: {} in {} (task_id: {})", 
+            location, function_name, task_id);
+        
+        // Update the current debug position
+        *CURRENT_DEBUG_POSITION.write().unwrap() = Some(DebugPosition {
+            file: file.to_string(),
+            line,
+            column,
+            function: function_name.to_string(),
+            stack_frame: 0,
+            is_async: true,
+            async_task_id: Some(task_id),
+        });
+        
+        // Update the debugger state
+        *DEBUGGER_STATE.write().unwrap() = DebuggerState::Paused;
+    }
+    
+    Ok(should_break)
+}
+
+/// Process a breakpoint hit event to determine if execution should pause
+fn process_breakpoint_hit(location: &str, task_id: u64) -> bool {
+    // Get the breakpoint details
+    let manager = BREAKPOINT_MANAGER.read().unwrap();
+    let bp = match manager.get_breakpoint_by_location(location) {
+        Some(bp) => bp.clone(),
+        None => return false, // No breakpoint found
+    };
+    
+    // Check hit count conditions
+    let hit_count_match = match &bp.condition_mode {
+        crate::runtime::BreakpointConditionMode::HitCount(condition) => condition.is_met(bp.hit_count),
+        crate::runtime::BreakpointConditionMode::Combined { hit_count, .. } => hit_count.is_met(bp.hit_count),
+        _ => true, // No hit count condition
+    };
+    
+    // If hit count doesn't match, don't pause
+    if !hit_count_match {
+        return false;
+    }
+    
+    // Check condition expression if one exists
+    match &bp.condition_mode {
+        crate::runtime::BreakpointConditionMode::ConditionalExpression(condition) => {
+            // Evaluate the condition in the current context
+            match evaluate_breakpoint_condition(condition, task_id) {
+                Ok(result) => {
+                    // Convert result to boolean
+                    match result.as_bool() {
+                        Ok(should_break) => should_break,
+                        Err(_) => {
+                            eprintln!("[DBUG] Error: Breakpoint condition did not evaluate to a boolean");
+                            false
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[DBUG] Error evaluating breakpoint condition: {}", e);
+                    false
+                }
+            }
+        },
+        crate::runtime::BreakpointConditionMode::Combined { expression, .. } => {
+            // Evaluate the condition in the current context
+            match evaluate_breakpoint_condition(expression, task_id) {
+                Ok(result) => {
+                    // Convert result to boolean
+                    match result.as_bool() {
+                        Ok(should_break) => should_break,
+                        Err(_) => {
+                            eprintln!("[DBUG] Error: Breakpoint condition did not evaluate to a boolean");
+                            false
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[DBUG] Error evaluating breakpoint condition: {}", e);
+                    false
+                }
+            }
+        },
+        _ => true, // No condition, always break
+    }
+}
+
+/// Evaluate a breakpoint condition in the current context
+fn evaluate_breakpoint_condition(condition: &str, task_id: u64) -> DbugResult<VariableValue> {
+    // This is a simplified version - in a real implementation,
+    // you would evaluate the condition in the current context,
+    // with access to variables, etc.
+    
+    // For now, just create a dummy result based on the task_id
+    // In a real implementation, this would use a proper expression evaluator
+    Ok(VariableValue::Boolean(task_id % 2 == 0))
+}
+
+// Add an extension trait for VariableValue to support as_bool
+trait VariableValueExt {
+    fn as_bool(&self) -> Result<bool, String>;
+}
+
+impl VariableValueExt for VariableValue {
+    fn as_bool(&self) -> Result<bool, String> {
+        match self {
+            VariableValue::Boolean(b) => Ok(*b),
+            VariableValue::Integer(i) => Ok(*i != 0),
+            VariableValue::Float(f) => Ok(*f != 0.0),
+            VariableValue::String(s) => Ok(!s.is_empty()),
+            _ => Err("Cannot convert value to boolean".into()),
+        }
     }
 } 

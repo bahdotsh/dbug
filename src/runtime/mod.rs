@@ -3,6 +3,7 @@
 pub mod variables;
 pub mod flow_control;
 pub mod type_visualization;
+pub mod async_support;
 
 pub use variables::{Variable, VariableValue, VariableInspector, ChangeStatus};
 pub use flow_control::{ExecutionState, FlowControl, ExecutionPoint, FlowController};
