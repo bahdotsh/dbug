@@ -40,6 +40,12 @@ pub enum DebugState {
     },
 }
 
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl App {
     /// Create a new application state
     pub fn new() -> Self {
@@ -66,9 +72,8 @@ impl App {
 
     /// Handle a terminal event
     pub fn handle_event(&mut self, event: Event) {
-        match event {
-            Event::Key(key) => self.handle_key_event(key),
-            _ => {}
+        if let Event::Key(key) = event {
+            self.handle_key_event(key)
         }
     }
 
@@ -147,7 +152,6 @@ impl App {
         let response = crate::communication::DebuggerResponse::StepOver;
         if let Err(e) = crate::communication::send_response(response) {
             eprintln!("Failed to send step over command: {}", e);
-            return;
         }
     }
 
@@ -157,7 +161,6 @@ impl App {
         let response = crate::communication::DebuggerResponse::StepInto;
         if let Err(e) = crate::communication::send_response(response) {
             eprintln!("Failed to send step into command: {}", e);
-            return;
         }
     }
 
@@ -167,7 +170,6 @@ impl App {
         let response = crate::communication::DebuggerResponse::StepOut;
         if let Err(e) = crate::communication::send_response(response) {
             eprintln!("Failed to send step out command: {}", e);
-            return;
         }
     }
 }

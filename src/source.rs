@@ -18,7 +18,7 @@ pub struct SourceFile {
 impl SourceFile {
     /// Load a source file from disk
     pub fn load(path: String) -> DbugResult<Self> {
-        let content = fs::read_to_string(&path).map_err(|e| DbugError::Io(e))?;
+        let content = fs::read_to_string(&path).map_err(DbugError::Io)?;
 
         let lines = content.lines().map(|line| line.to_string()).collect();
 
@@ -40,7 +40,7 @@ impl SourceFile {
 
     /// Save the source file to disk
     pub fn save(&self, path: &Path) -> DbugResult<()> {
-        fs::write(path, &self.content).map_err(|e| DbugError::Io(e))?;
+        fs::write(path, &self.content).map_err(DbugError::Io)?;
 
         Ok(())
     }

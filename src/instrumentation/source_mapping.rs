@@ -79,7 +79,7 @@ impl SourceContext {
 
     /// Load a source context from a file with N lines of context
     pub fn load(file: &Path, line: u32, context_lines: u32) -> DbugResult<Self> {
-        let content = fs::read_to_string(file).map_err(|e| DbugError::Io(e))?;
+        let content = fs::read_to_string(file).map_err(DbugError::Io)?;
 
         let mut lines = HashMap::new();
         let line_count = content.lines().count() as u32;
@@ -143,6 +143,12 @@ pub struct SourceMap {
     source_cache: HashMap<PathBuf, Vec<String>>,
 }
 
+impl Default for SourceMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SourceMap {
     /// Create a new empty source map
     pub fn new() -> Self {
@@ -201,7 +207,7 @@ impl SourceMap {
             return Ok(());
         }
 
-        let content = fs::read_to_string(file_path).map_err(|e| DbugError::Io(e))?;
+        let content = fs::read_to_string(file_path).map_err(DbugError::Io)?;
 
         let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
         self.source_cache.insert(file_path.to_path_buf(), lines);

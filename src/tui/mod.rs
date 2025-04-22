@@ -23,7 +23,7 @@ pub fn run() -> DbugResult<()> {
         terminal.draw(|f| ui::draw(f, &app))?;
 
         // Handle events
-        if let Some(event) = events.next()? {
+        if let Some(event) = events.poll_next()? {
             app.handle_event(event);
         }
 

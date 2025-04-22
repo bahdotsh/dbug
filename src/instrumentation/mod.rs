@@ -280,7 +280,7 @@ impl Instrumenter {
         let original_path = Path::new(&self.base_dir).join(file_path);
 
         match fs::read_to_string(&original_path) {
-            Ok(content) => {
+            Ok(_content) => {
                 println!("Instrumenting file: {}", original_path.display());
                 println!("Found {} debug points", debug_points.len());
 
@@ -376,7 +376,7 @@ impl Instrumenter {
 
         // For now, just write the original content to the output file
         // In a full implementation, we would instrument the code here
-        fs::write(output, content).map_err(|e| DbugError::Io(e))?;
+        fs::write(output, content).map_err(DbugError::Io)?;
 
         Ok(())
     }

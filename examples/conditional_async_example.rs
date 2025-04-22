@@ -29,7 +29,7 @@ async fn process_values(values: Vec<i32>) -> i32 {
     println!("Processing {} values", values.len());
 
     // Register the variable with the debugger
-    let _ = register_var!(values);
+    register_var!(values);
 
     let mut sum = 0;
     for (index, value) in values.iter().enumerate() {
@@ -47,7 +47,7 @@ async fn process_values(values: Vec<i32>) -> i32 {
     }
 
     println!("Done processing with sum: {}", sum);
-    let _ = register_var!(sum);
+    register_var!(sum);
 
     sum
 }

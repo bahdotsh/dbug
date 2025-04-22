@@ -26,6 +26,12 @@ pub struct DebugSession {
     breakpoints: Vec<(String, u32)>, // (file, line)
 }
 
+impl Default for DebugSession {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DebugSession {
     /// Create a new debugging session
     pub fn new() -> Self {
@@ -69,7 +75,7 @@ impl DebugSession {
                 use std::process::Command;
                 let _ = Command::new("kill")
                     .arg("-TERM")
-                    .arg(&pid.to_string())
+                    .arg(pid.to_string())
                     .status();
             }
 

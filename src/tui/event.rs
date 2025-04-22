@@ -47,7 +47,7 @@ impl Events {
     }
 
     /// Get the next event, which can be either a terminal event or a tick
-    pub fn next(&mut self) -> DbugResult<Option<Event>> {
+    pub fn poll_next(&mut self) -> DbugResult<Option<Event>> {
         // Check if we've received an event
         if let Ok(event) = self.rx.try_recv() {
             return Ok(Some(event));

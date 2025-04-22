@@ -128,7 +128,7 @@ impl TypeVisualizer {
                     let mut special_info = String::new();
 
                     for (i, c) in s.chars().enumerate() {
-                        if c < ' ' || c > '~' {
+                        if !(' '..='~').contains(&c) {
                             if !special_chars {
                                 special_chars = true;
                                 special_info.push_str("\nSpecial characters:");

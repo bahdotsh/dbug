@@ -165,17 +165,17 @@ impl HitCountCondition {
     /// Format: "= N", "> N", "% N"
     pub fn from_string(s: &str) -> Option<Self> {
         let s = s.trim();
-        if s.starts_with('=') {
-            let count_str = s[1..].trim();
+        if let Some(stripped) = s.strip_prefix('=') {
+            let count_str = stripped.trim();
             count_str.parse::<u32>().ok().map(HitCountCondition::Equals)
-        } else if s.starts_with('>') {
-            let count_str = s[1..].trim();
+        } else if let Some(stripped) = s.strip_prefix('>') {
+            let count_str = stripped.trim();
             count_str
                 .parse::<u32>()
                 .ok()
                 .map(HitCountCondition::GreaterThan)
-        } else if s.starts_with('%') {
-            let count_str = s[1..].trim();
+        } else if let Some(stripped) = s.strip_prefix('%') {
+            let count_str = stripped.trim();
             count_str
                 .parse::<u32>()
                 .ok()
@@ -474,7 +474,7 @@ impl WatchExpression {
         // In a real implementation, this would use a proper expression parser
 
         // Find the operator
-        let op_pos = expression.find(|c| c == '+' || c == '-' || c == '*' || c == '/');
+        let op_pos = expression.find(['+', '-', '*', '/']);
         if let Some(pos) = op_pos {
             let left_expr = expression[..pos].trim();
             let right_expr = expression[pos + 1..].trim();

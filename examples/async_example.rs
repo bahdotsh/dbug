@@ -29,7 +29,7 @@ async fn fetch_data(id: u32) -> String {
     println!("Fetching data for id: {}", id);
 
     // Register the variable with the debugger
-    let _ = register_var!(id);
+    register_var!(id);
 
     // Simulate an async operation (e.g., network request)
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -40,7 +40,7 @@ async fn fetch_data(id: u32) -> String {
     let result = format!("Data for id: {}", id);
 
     // Register the result with the debugger
-    let _ = register_var!(result);
+    register_var!(result);
 
     println!("Fetched: {}", result);
     result
@@ -74,7 +74,7 @@ async fn process_data(data: String) -> String {
     println!("Processing data: {}", data);
 
     // Register the variable with the debugger
-    let _ = register_var!(data);
+    register_var!(data);
 
     // Simulate some processing time
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -85,7 +85,7 @@ async fn process_data(data: String) -> String {
     let processed = format!("Processed: {}", data);
 
     // Register the result with the debugger
-    let _ = register_var!(processed);
+    register_var!(processed);
 
     println!("Processed result: {}", processed);
     processed

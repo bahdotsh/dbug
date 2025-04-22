@@ -393,9 +393,7 @@ impl VariableInspector {
     fn are_values_equal(val1: &VariableValue, val2: &VariableValue) -> bool {
         match (val1, val2) {
             (VariableValue::Integer(i1), VariableValue::Integer(i2)) => i1 == i2,
-            (VariableValue::Float(f1), VariableValue::Float(f2)) => {
-                (f1 - f2).abs() < std::f64::EPSILON
-            }
+            (VariableValue::Float(f1), VariableValue::Float(f2)) => (f1 - f2).abs() < f64::EPSILON,
             (VariableValue::Boolean(b1), VariableValue::Boolean(b2)) => b1 == b2,
             (VariableValue::String(s1), VariableValue::String(s2)) => s1 == s2,
             (VariableValue::Char(c1), VariableValue::Char(c2)) => c1 == c2,

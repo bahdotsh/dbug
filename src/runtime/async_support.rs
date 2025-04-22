@@ -39,7 +39,7 @@ pub enum AsyncTaskState {
 
 // Thread-local storage for the current task ID
 thread_local! {
-    static CURRENT_TASK_ID: std::cell::Cell<Option<TaskId>> = std::cell::Cell::new(None);
+    static CURRENT_TASK_ID: std::cell::Cell<Option<TaskId>> = const { std::cell::Cell::new(None) };
 }
 
 // A global counter for generating unique task IDs
@@ -179,7 +179,7 @@ fn visualize_task(
         indent,
         task.id,
         task.function_name,
-        task.state.to_string(),
+        task.state,
         humantime::format_duration(task.created_at.elapsed())
     ));
 
@@ -191,15 +191,15 @@ fn visualize_task(
     }
 }
 
-// Implement ToString for AsyncTaskState
-impl ToString for AsyncTaskState {
-    fn to_string(&self) -> String {
+// Implement Display for AsyncTaskState instead of ToString
+impl std::fmt::Display for AsyncTaskState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Created => "Created".to_string(),
-            Self::Running => "Running".to_string(),
-            Self::Waiting => "Waiting".to_string(),
-            Self::Completed => "Completed".to_string(),
-            Self::Cancelled => "Cancelled".to_string(),
+            Self::Created => write!(f, "Created"),
+            Self::Running => write!(f, "Running"),
+            Self::Waiting => write!(f, "Waiting"),
+            Self::Completed => write!(f, "Completed"),
+            Self::Cancelled => write!(f, "Cancelled"),
         }
     }
 }

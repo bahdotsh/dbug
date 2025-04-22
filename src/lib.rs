@@ -43,11 +43,11 @@ pub mod _internal {
         init();
 
         // Get the current file and line number
-        let file = std::panic::Location::caller().file();
-        let line = std::panic::Location::caller().line();
+        let _file = std::panic::Location::caller().file();
+        let _line = std::panic::Location::caller().line();
 
         // Notify the debugger
-        if let Err(e) = crate::communication::notify_function_entered(function_name, file, line) {
+        if let Err(e) = crate::communication::notify_function_entered(function_name, _file, _line) {
             eprintln!("[DBUG] Error notifying function entry: {}", e);
         }
 
@@ -118,8 +118,8 @@ pub mod _internal {
         init();
 
         // Get the current file and line number
-        let file = std::panic::Location::caller().file();
-        let line = std::panic::Location::caller().line();
+        let _file = std::panic::Location::caller().file();
+        let _line = std::panic::Location::caller().line();
 
         // Notify the debugger
         if let Err(e) = crate::communication::notify_async_function_entered(function_name, task_id)

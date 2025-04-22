@@ -1,7 +1,6 @@
 //! Test for visualizing async task tree
 
 use dbug::prelude::*;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::time::sleep;
@@ -35,7 +34,7 @@ async fn async_task(id: u32) -> u32 {
     };
 
     // Register the variable
-    let _ = register_var!(id);
+    register_var!(id);
 
     // Add a debug point
     dbug::_internal::async_break_point(file!(), line!(), column!(), task_id);
